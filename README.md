@@ -81,7 +81,7 @@ Autodesk's streaming 3D/2D viewing format. Translating a file to SVF2 produces a
 ### OAuth 2LO (two-legged)
 WorkflowSkills MCP authenticates with APS using your Client ID and Client Secret via the OAuth 2.0 client credentials flow. Tokens are cached and refreshed automatically. The Client Secret is stored in your OS keychain after first run — it is never written to a file or logged.
 
-## OAuth 3LO (three-legged)
+### OAuth 3LO (three-legged)
 WorkflowSkills MCP now supports authentication for specific APIs with 3LO.
 
 ---
