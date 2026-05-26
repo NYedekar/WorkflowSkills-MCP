@@ -171,7 +171,7 @@ No file — just an APS API call or info question?
 ## Prerequisites
 
 - [Node.js](https://nodejs.org) v18 or later
-- [Claude Desktop](https://claude.ai/download) (recommended) or [Claude Code](https://claude.ai/code)
+- [Claude Desktop](https://claude.ai/download) or [Claude Code](https://claude.ai/code)
 - An APS application with a **Client ID** and **Client Secret** — create one free at [aps.autodesk.com/myapps](https://aps.autodesk.com/myapps)
 
 ---
