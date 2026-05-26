@@ -1,4 +1,7 @@
 import { z } from "zod";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import { resolveCredential, DEFAULT_SCOPES } from "../auth/credential-resolver.js";
 import { findCapabilityById, findOperationByGlobalId } from "../lib/registry-client.js";
 import { getActivity, getNickname, ensureBucket, uploadJsonToOss, submitWorkItem, pollWorkItem, getSignedDownloadUrl, getSignedS3UploadUrl, finalizeS3Upload, DAError, } from "../lib/da-client.js";
@@ -289,13 +292,40 @@ async function executeRest(cap, op, input, t0) {
             hint: httpHint(res.status),
         };
     }
+    // Guard against tool-result-too-large: auto-save responses >800KB to disk.
+    // APS property/metadata dumps can be 1–5MB raw — returning inline blows the 1MB MCP limit.
+    const INLINE_LIMIT = 800_000;
+    const responseJson = typeof responseBody === "string" ? responseBody : JSON.stringify(responseBody);
+    const responseSize = Buffer.byteLength(responseJson, "utf-8");
+    let savedResponseTo;
+    let effectiveResponseBody = responseBody;
+    if (responseSize > INLINE_LIMIT) {
+        const timestamp = Date.now();
+        const opSlug = op.operationId.replace(/[^a-zA-Z0-9-]/g, "-").slice(0, 40);
+        const filename = `aps-${opSlug}-${timestamp}.json`;
+        savedResponseTo = path.join(os.homedir(), "Downloads", filename);
+        try {
+            fs.writeFileSync(savedResponseTo, responseJson, "utf-8");
+            effectiveResponseBody =
+                `[Response too large to return inline — ${(responseSize / 1024).toFixed(0)} KB. ` +
+                    `Full JSON saved to: ${savedResponseTo}. ` +
+                    `For property data, prefer query_specific_properties with category filters to get targeted chunks.]`;
+        }
+        catch {
+            // If save fails, fall back to a truncated inline preview
+            effectiveResponseBody =
+                `[Response truncated — ${(responseSize / 1024).toFixed(0)} KB total, too large to return inline. ` +
+                    `Preview: ${responseJson.slice(0, 5_000)}...]`;
+        }
+    }
     const result = {
         status: "success",
         mode: "rest",
         http_status: res.status,
         capability: capSummary(cap),
         operation: opSummary(op),
-        response: responseBody,
+        response: effectiveResponseBody,
+        ...(savedResponseTo ? { response_saved_to: savedResponseTo, response_size_bytes: responseSize } : {}),
         durationMs,
         ...(manualUrnOverrideWarning ? { hint: manualUrnOverrideWarning } : {}),
     };

@@ -244,6 +244,19 @@ export async function handleProcessFile(input: ProcessFileInput): Promise<Proces
   const outputs: OutputFile[] = await Promise.all(
     allOssUrls.map(async (outUrl) => {
       const r = await handleGetResult({ oss_url: outUrl, max_chars: input.max_result_chars, offset_chars: 0, force_text: false });
+      // For binary outputs, skip inlining content — return oss_url only so the tool result stays small.
+      // The model should call get_download_link or get_result(save_to=...) to retrieve the file.
+      if (r.binary) {
+        return {
+          oss_url: outUrl,
+          content_type: r.content_type ?? "unknown",
+          size_bytes: r.size_bytes,
+          content: `[Binary output — ${(r.size_bytes ?? 0).toLocaleString()} bytes. Call get_download_link(oss_url="${outUrl}") to get a clickable download link, or get_result(oss_url=..., save_to="~/Downloads") to save to disk.]`,
+          has_more: false,
+          truncated: false,
+          binary: true,
+        };
+      }
       return {
         oss_url: outUrl,
         content_type: r.content_type ?? "unknown",
@@ -253,7 +266,7 @@ export async function handleProcessFile(input: ProcessFileInput): Promise<Proces
         has_more: r.has_more ?? false,
         next_offset: r.next_offset,
         truncated: r.truncated ?? false,
-        binary: r.binary ?? false,
+        binary: false,
       };
     })
   );
