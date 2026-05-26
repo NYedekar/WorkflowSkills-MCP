@@ -21,9 +21,16 @@ function check(name, cond, detail = "") {
 }
 
 function parseToolResult(res) {
-  if (!res || !res.content || !res.content[0]) {
+  if (!res || !res.content || !res.content.length) {
     throw new Error("Tool result missing content");
   }
+  // create_workflow now returns [renderedAscii, jsonDag]; export_workflow returns [text].
+  // The JSON / serialized payload is always the LAST content block.
+  return res.content[res.content.length - 1].text;
+}
+
+function renderedBlock(res) {
+  if (!res || !res.content || res.content.length < 2) return null;
   return res.content[0].text;
 }
 
@@ -72,6 +79,21 @@ async function main() {
     },
   });
   const linearDag = JSON.parse(parseToolResult(linear));
+  const linearRendered = renderedBlock(linear);
+  check(
+    "linear: response has two content blocks (rendered + json)",
+    linear.content.length === 2,
+    `got ${linear.content.length}`
+  );
+  check(
+    "linear: rendered diagram present and labelled",
+    !!linearRendered && linearRendered.includes("Workflow:") && linearRendered.includes("FETCH"),
+    linearRendered ? linearRendered.split("\n")[0] : "(missing)"
+  );
+  check(
+    "linear: rendered diagram includes node labels",
+    !!linearRendered && linearRendered.includes("Fetch user") && linearRendered.includes("Send email"),
+  );
   check("linear: nodes=3", linearDag.nodes.length === 3);
   check("linear: edges=2", linearDag.edges.length === 2);
   check("linear: no cycles", linearDag.metadata.has_cycles === false);
@@ -256,6 +278,258 @@ async function main() {
     "validation: unknown tool name → isError",
     unknownTool.isError === true,
     parseToolResult(unknownTool).slice(0, 120)
+  );
+
+  // ─── 7. Loop-completion semantics (RFC v4) ────────────────────────────
+
+  // V1 — baseline: 1 body, 1 after-loop
+  const v1 = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      name: "v1-baseline",
+      description: "1 body + 1 after-loop",
+      intents: [
+        { id: "L", label: "L", type: "loop", description: "loop", action: "loop", entities: [], parameters: {} },
+        { id: "B", label: "B", type: "custom", description: "body", action: "b", entities: [], parameters: {} },
+        { id: "A", label: "A", type: "custom", description: "after", action: "a", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "B", type: "loop", confidence: 1 },
+        { from: "L", to: "A", type: "after_loop", confidence: 1 },
+      ],
+    },
+  });
+  const v1Dag = JSON.parse(parseToolResult(v1));
+  check(
+    "V1: parallel_groups does NOT contain [B, A]",
+    !v1Dag.metadata.parallel_groups.some(
+      (g) => g.includes("node_B") && g.includes("node_A")
+    ),
+    `got ${JSON.stringify(v1Dag.metadata.parallel_groups)}`
+  );
+  const v1ADeps = v1Dag.nodes.find((n) => n.id === "node_A").dependencies;
+  check(
+    "V1: A.dependencies includes node_B (synthetic completion dep)",
+    v1ADeps.includes("node_B"),
+    `got ${JSON.stringify(v1ADeps)}`
+  );
+
+  // V21 — isSynthetic edges never leak to response
+  check(
+    "V21: response edges contain no isSynthetic edges",
+    v1Dag.edges.every((e) => !e.isSynthetic)
+  );
+  check(
+    "V21: response edges count matches caller-provided count (2)",
+    v1Dag.edges.length === 2
+  );
+
+  // V9 — smoking-gun regression: replay fixture verbatim
+  const FIXTURE = JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL("./fixtures/regression-loop-completion.json", import.meta.url)),
+      "utf8"
+    )
+  );
+  const v9 = await client.callTool({
+    name: "create_workflow",
+    arguments: FIXTURE,
+  });
+  const v9Dag = JSON.parse(parseToolResult(v9));
+  check(
+    "V9: parallel_groups does NOT contain [load_file, run_clash_detection]",
+    !v9Dag.metadata.parallel_groups.some(
+      (g) =>
+        g.includes("node_load_file") &&
+        g.includes("node_run_clash_detection")
+    ),
+    `got ${JSON.stringify(v9Dag.metadata.parallel_groups)}`
+  );
+  check(
+    "V9: warnings non-empty (auto-promotion fired)",
+    Array.isArray(v9Dag.metadata.warnings) && v9Dag.metadata.warnings.length > 0,
+    `got ${JSON.stringify(v9Dag.metadata.warnings)}`
+  );
+
+  // V6 — auto-promotion warning string format
+  check(
+    "V6: deprecation warning matches regex",
+    v9Dag.metadata.warnings.some((w) =>
+      /^\[deprecation\] Edge .+ auto-promoted: 'sequential' → 'after_loop'/.test(w)
+    ),
+    `got ${JSON.stringify(v9Dag.metadata.warnings)}`
+  );
+
+  // V18 — self-loop on loop node is rejected
+  const v18 = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "L", label: "L", type: "loop", description: "", action: "loop", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "L", type: "loop", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V18: self-loop rejected with InvalidLoopError",
+    v18.isError === true &&
+      parseToolResult(v18).includes("self-referential"),
+    parseToolResult(v18).slice(0, 200)
+  );
+
+  // V14 — loop with no body is rejected
+  const v14 = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "L", label: "L", type: "loop", description: "", action: "loop", entities: [], parameters: {} },
+        { id: "A", label: "A", type: "custom", description: "", action: "a", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "A", type: "after_loop", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V14: loop with no body rejected",
+    v14.isError === true &&
+      parseToolResult(v14).includes("loop node has no body"),
+    parseToolResult(v14).slice(0, 200)
+  );
+
+  // V13 — after_loop from a non-loop node is rejected
+  const v13 = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "T", label: "T", type: "transform", description: "", action: "t", entities: [], parameters: {} },
+        { id: "X", label: "X", type: "custom", description: "", action: "x", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "T", to: "X", type: "after_loop", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V13: after_loop from non-loop node rejected",
+    v13.isError === true &&
+      parseToolResult(v13).includes("after_loop edge from non-loop node"),
+    parseToolResult(v13).slice(0, 200)
+  );
+
+  // V15 — forbidden edge types from loop node are rejected
+  const v15 = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "L", label: "L", type: "loop", description: "", action: "loop", entities: [], parameters: {} },
+        { id: "B", label: "B", type: "custom", description: "", action: "b", entities: [], parameters: {} },
+        { id: "X", label: "X", type: "custom", description: "", action: "x", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "B", type: "loop", confidence: 1 },
+        { from: "L", to: "X", type: "parallel", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V15: 'parallel' edge from loop node rejected",
+    v15.isError === true &&
+      parseToolResult(v15).includes("not supported from a loop node"),
+    parseToolResult(v15).slice(0, 200)
+  );
+
+  // V20 — after-loop target also reachable from body via chain → rejected
+  const v20 = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "L", label: "L", type: "loop", description: "", action: "loop", entities: [], parameters: {} },
+        { id: "B", label: "B", type: "custom", description: "", action: "b", entities: [], parameters: {} },
+        { id: "X", label: "X", type: "custom", description: "", action: "x", entities: [], parameters: {} },
+        { id: "A", label: "A", type: "custom", description: "", action: "a", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "B", type: "loop", confidence: 1 },
+        { from: "B", to: "X", type: "sequential", confidence: 1 },
+        { from: "X", to: "A", type: "sequential", confidence: 1 },
+        { from: "L", to: "A", type: "after_loop", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V20: after-loop exclusivity violation rejected",
+    v20.isError === true &&
+      parseToolResult(v20).includes("also reachable from the body"),
+    parseToolResult(v20).slice(0, 200)
+  );
+
+  // V12 — synthetic-induced cycle: caller writes A→B (after-loop target → body)
+  const v12 = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "L", label: "L", type: "loop", description: "", action: "loop", entities: [], parameters: {} },
+        { id: "B", label: "B", type: "custom", description: "", action: "b", entities: [], parameters: {} },
+        { id: "A", label: "A", type: "custom", description: "", action: "a", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "B", type: "loop", confidence: 1 },
+        { from: "L", to: "A", type: "after_loop", confidence: 1 },
+        { from: "A", to: "B", type: "sequential", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V12: synthetic-induced cycle rejected",
+    v12.isError === true &&
+      parseToolResult(v12).includes(
+        "after-loop target has a caller-defined path"
+      ),
+    parseToolResult(v12).slice(0, 200)
+  );
+
+  // V22 case 1 — caller intents [L, B]: cycle break removes non-body edge → succeeds
+  const v22a = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "L", label: "L", type: "loop", description: "", action: "loop", entities: [], parameters: {} },
+        { id: "B", label: "B", type: "custom", description: "", action: "b", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "B", type: "loop", confidence: 1 },
+        { from: "B", to: "L", type: "sequential", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V22 case 1: cycle breaks non-body edge → pipeline succeeds",
+    v22a.isError !== true,
+    parseToolResult(v22a).slice(0, 200)
+  );
+
+  // V22 case 2 — caller intents [B, L]: cycle break removes body edge → rejected
+  const v22b = await client.callTool({
+    name: "create_workflow",
+    arguments: {
+      intents: [
+        { id: "B", label: "B", type: "custom", description: "", action: "b", entities: [], parameters: {} },
+        { id: "L", label: "L", type: "loop", description: "", action: "loop", entities: [], parameters: {} },
+      ],
+      relationships: [
+        { from: "L", to: "B", type: "loop", confidence: 1 },
+        { from: "B", to: "L", type: "sequential", confidence: 1 },
+      ],
+    },
+  });
+  check(
+    "V22 case 2: cycle breaks only body edge → rejected",
+    v22b.isError === true &&
+      parseToolResult(v22b).includes("cycle breaking removed the only body edge"),
+    parseToolResult(v22b).slice(0, 200)
   );
 
   // ─── Done ─────────────────────────────────────────────────────────────

@@ -1,0 +1,17 @@
+{
+  "name": "Forma Files → Clash Detection → Deliverables Export",
+  "description": "Regression fixture for loop-completion semantics fix.",
+  "intents": [
+    { "id": "fetch_file_list", "label": "List files", "type": "fetch", "description": "List files in Forma project A", "action": "fetch", "entities": [], "parameters": {} },
+    { "id": "iterate_files", "label": "Iterate", "type": "loop", "description": "Loop over 10 files", "action": "loop", "entities": [], "parameters": {} },
+    { "id": "load_file", "label": "Load file", "type": "fetch", "description": "Load one file per iteration", "action": "load", "entities": [], "parameters": {} },
+    { "id": "run_clash_detection", "label": "Clash detection", "type": "transform", "description": "Run clash detection", "action": "transform", "entities": [], "parameters": {} },
+    { "id": "export_to_deliverables", "label": "Export", "type": "store", "description": "Export to Deliverables folder", "action": "store", "entities": [], "parameters": {} }
+  ],
+  "relationships": [
+    { "from": "fetch_file_list",      "to": "iterate_files",          "type": "sequential", "confidence": 1 },
+    { "from": "iterate_files",        "to": "load_file",              "type": "loop",       "confidence": 1 },
+    { "from": "iterate_files",        "to": "run_clash_detection",    "type": "sequential", "confidence": 1 },
+    { "from": "run_clash_detection",  "to": "export_to_deliverables", "type": "sequential", "confidence": 1 }
+  ]
+}
