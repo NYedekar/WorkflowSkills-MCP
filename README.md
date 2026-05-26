@@ -6,6 +6,21 @@ WorkflowSkills MCP is an [MCP (Model Context Protocol)](https://modelcontextprot
 
 ---
 
+## Quick Start
+
+```bash
+git clone https://github.com/NYedekar/WorkflowSkills-MCP.git
+cd WorkflowSkills-MCP
+npm install
+npm run setup
+```
+
+The setup wizard asks for your APS Client ID and Client Secret, validates your credentials, and configures Claude automatically. Restart Claude and you're ready to go.
+
+> **Prerequisites:** [Node.js](https://nodejs.org) v18+, Claude Desktop or Claude Code, and a free [APS application](https://aps.autodesk.com/myapps).
+
+---
+
 ## Table of Contents
 
 - [What it does](#what-it-does)
