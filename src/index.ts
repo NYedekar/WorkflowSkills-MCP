@@ -64,23 +64,42 @@ const server = new Server(
 
       "These are Autodesk proprietary formats. DO NOT attempt to read, parse, or process them using Python, bash, olefile, rvt-meta, or any local library — they require APS cloud services and will fail or produce wrong results locally.\n\n" +
 
-      "FLOW:\n" +
-      "1. get_capability(query='<ext> <user-intent>') — present results; ask user to confirm.\n" +
-      "2. User confirms → call authenticate_aps() BEFORE anything else.\n" +
-      "   • error → show error; do not proceed to process_file. Ask user to check APS credentials.\n" +
-      "   • success → continue to step 3.\n" +
-      "3. Call process_file(file_path, intent, capability_id, operation_id).\n" +
-      "   • success → present outputs. Done.\n" +
-      "   • pending → WorkItem running. Call get_workflow_status(workflow_handle). Repeat until success or failed.\n" +
-      "   • bridge_required → show REQUIRED_ACTION to user verbatim. Ask for the file's actual Mac path (local folder, ~/Downloads/, or OneDrive). Retry process_file with that path.\n" +
-      "   • no_capability_found → answer from knowledge + show gap_note.\n" +
-      "   • error → show error + hint to user.\n" +
-      "4. User declines → answer from knowledge.\n\n" +
+      "── TOOL SELECTION ───────────────────────────────────────────────────────\n\n" +
 
-      "NETWORK RULE: bash cannot reach Autodesk, S3, or localhost HTTP (all blocked by Claude Desktop proxy). The MCP server (Mac) can reach Autodesk/S3. ALWAYS use get_result to fetch output files — never curl/wget from bash.\n\n" +
+      "Use this decision tree every time before picking a tool:\n\n" +
 
-      "PIPELINES: use create_workflow. Render ASCII diagram verbatim in a fenced code block.\n" +
-      "PURE INFO (no file present, no operation): answer directly.",
+      "1. Single intent + local file?\n" +
+      "   → process_file  (fast path: upload + run + return results in one call. No planning needed.)\n\n" +
+
+      "2. Multiple intents + local file?\n" +
+      "   → create_workflow(file_path=..., intents=[...])  — uploads the file ONCE, builds the DAG, returns oss_url.\n" +
+      "   → Then execute_workflow(input_file_url=oss_url, ...) for each step in the DAG.\n" +
+      "   NEVER call process_file multiple times for the same file — it re-uploads each time.\n\n" +
+
+      "3. File already in APS OSS (you have an oss:// URL)?\n" +
+      "   → execute_workflow directly — no upload needed.\n\n" +
+
+      "4. No file, just an APS REST operation or info question?\n" +
+      "   → execute_workflow for REST calls. Answer from knowledge for pure info.\n\n" +
+
+      "── STANDARD FLOW ────────────────────────────────────────────────────────\n\n" +
+
+      "Step 1 — get_capability(query='<ext> <intent>') — present results; confirm with user.\n" +
+      "Step 2 — authenticate_aps() — ALWAYS before any upload or execution.\n" +
+      "         • error → stop. Show error. Ask user to check APS credentials.\n" +
+      "Step 3 — Execute using the tool selected above (process_file or create_workflow + execute_workflow).\n\n" +
+
+      "── STATUS HANDLING (process_file and execute_workflow) ──────────────────\n\n" +
+      "• success         → present outputs. Done.\n" +
+      "• pending         → WorkItem still running. Call get_workflow_status(workflow_handle). Repeat until success or failed.\n" +
+      "• bridge_required → show REQUIRED_ACTION verbatim. Ask for the file's actual Mac path (~/Downloads/, OneDrive, or local folder). Retry with that path.\n" +
+      "• no_capability_found → show gap_note. Answer from knowledge.\n" +
+      "• error           → show error + hint.\n\n" +
+
+      "── RULES ────────────────────────────────────────────────────────────────\n\n" +
+      "NETWORK: bash cannot reach Autodesk, S3, or localhost (blocked by Claude Desktop proxy). The MCP server (Mac process) handles all network calls. ALWAYS use get_result to read output files — never curl/wget.\n" +
+      "PIPELINES: always render the ASCII diagram from create_workflow verbatim in a fenced code block.\n" +
+      "PURE INFO (no file, no operation): answer directly — do not call any tool.",
   }
 );
 
@@ -92,8 +111,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "create_workflow",
         description:
-          "Design a multi-step Autodesk automation pipeline as a DAG (fetch/transform/export/notify/trigger across Revit, ACC, APS, Model Derivative, etc.). " +
-          "Returns two blocks: (1) ASCII diagram — reproduce it verbatim in a fenced code block; (2) JSON DAG.",
+          "Use when the user's request has MULTIPLE intents for an Autodesk file or pipeline. " +
+          "Decomposes the request into a DAG of steps (sequential, parallel, conditional, loop), plans execution order, and renders an ASCII pipeline diagram. " +
+          "Accepts an optional file_path — when provided, uploads the file to APS OSS ONCE and returns oss_url alongside the DAG. " +
+          "Pass that oss_url to every subsequent execute_workflow call so all steps share the same upload. " +
+          "Does NOT execute any steps — use execute_workflow to run each node in the DAG after reviewing the plan. " +
+          "Returns: (1) ASCII diagram — render it verbatim in a fenced code block; (2) JSON DAG; (3) oss_url if a file was provided. " +
+          "STATUS FLOW for the file upload: bridge_required → show REQUIRED_ACTION verbatim and ask for the file's actual Mac path; error → show error + hint.",
         inputSchema: zodToJsonSchema(createWorkflowSchema),
       },
       {
@@ -132,10 +156,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_workflow",
         description:
-          "Run an APS capability: Engine-API (DA WorkItem → polls → outputOssUrl) or Platform-API (REST call → response). " +
-          "Call get_capability first for capability_id+operation_id. For attached/local files, call upload_file first to get an oss_url. " +
+          "Run a SINGLE APS capability operation: Engine-API (DA WorkItem → polls → outputOssUrl) or Platform-API (REST call → response). " +
+          "Use this to run each step of a multi-intent pipeline after create_workflow has planned the DAG. " +
+          "Also use directly when the file is already in APS OSS (you have an oss:// URL) and you know the capability + operation. " +
+          "Call get_capability first for capability_id+operation_id. " +
+          "For local files with a single step, prefer process_file instead — it handles upload automatically. " +
+          "For local files with multiple steps, use create_workflow(file_path=...) to upload once and get oss_url, then call execute_workflow per step. " +
           "After execution, call get_result with outputOssUrl to read the primary output. " +
-          "Multi-output operations (e.g. RevitExtractor) return outputOssUrls[] — call get_result on each entry.",
+          "Multi-output operations return outputOssUrls[] — call get_result on each entry.",
         inputSchema: zodToJsonSchema(executeWorkflowSchema),
       },
       {
@@ -154,13 +182,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "process_file",
         description:
-          "Execute a complete Autodesk file workflow in one call: auto-selects capability from file type + intent, uploads, runs the DA WorkItem or REST operation, and returns all output content. " +
-          "PRIMARY tool for single-file workflows — replaces upload_file → execute_workflow → get_result. " +
+          "Fast path for a SINGLE intent + local file: auto-selects capability, uploads, runs, and returns all output in one call. " +
+          "Use ONLY when the user has exactly one thing to do with a local file. " +
+          "For multiple intents on the same file, use create_workflow(file_path=...) instead — it uploads once and shares the oss_url across all steps. " +
+          "Do NOT call process_file in a loop for the same file — it re-uploads on every call. " +
           "STATUS FLOW: " +
           "• success → present outputs. Done. " +
-          "• pending → WorkItem is still running. Call get_workflow_status(workflow_handle) to continue polling. " +
-          "• bridge_required → file is a chat attachment; MCP server cannot read it. Show REQUIRED_ACTION to user verbatim and wait for them to save it to ~/Downloads/. " +
-          "• no_capability_found → show gap_note, answer from knowledge. " +
+          "• pending → WorkItem still running. Call get_workflow_status(workflow_handle). Repeat until success or failed. " +
+          "• bridge_required → file is a chat attachment; MCP server cannot read it. Show REQUIRED_ACTION verbatim. Ask user for the file's actual Mac path (~/Downloads/, OneDrive, or local folder). Retry with that path. " +
+          "• no_capability_found → show gap_note. Answer from knowledge. " +
           "• error → show error + hint.",
         inputSchema: zodToJsonSchema(processFileSchema),
       },
