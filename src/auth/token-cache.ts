@@ -29,3 +29,11 @@ export function setCachedToken(key: string, token: string, expiresInSeconds: num
 export function clearCachedToken(key: string): void {
   cache.delete(key);
 }
+
+// Returns seconds remaining before the token hits the refresh buffer (i.e. how long callers can trust it).
+export function getRemainingTtlSeconds(key: string): number | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  const remainingMs = entry.expires_at - Date.now() - REFRESH_BUFFER_MS;
+  return remainingMs > 0 ? Math.floor(remainingMs / 1000) : null;
+}

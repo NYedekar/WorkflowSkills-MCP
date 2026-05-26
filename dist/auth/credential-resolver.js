@@ -1,5 +1,5 @@
 import { getTwoLeggedToken, APSAuthError } from "./aps-token-client.js";
-import { getCachedToken, setCachedToken } from "./token-cache.js";
+import { getCachedToken, setCachedToken, getRemainingTtlSeconds } from "./token-cache.js";
 import { loadSecret } from "./keychain.js"; // synchronous; returns null when keychain unavailable
 export const DEFAULT_SCOPES = [
     "data:read",
@@ -39,7 +39,8 @@ export async function resolveCredential(scopes = DEFAULT_SCOPES) {
     // 1. Check in-memory cache first.
     const cached = getCachedToken(cacheKey);
     if (cached) {
-        return { client_id: clientId, access_token: cached, scopes };
+        const ttl = getRemainingTtlSeconds(cacheKey) ?? 300; // fallback: 5 min if cache entry in transition
+        return { client_id: clientId, access_token: cached, scopes, expires_in_seconds: ttl };
     }
     // 2. Resolve the client secret — keychain takes priority over env var.
     let clientSecret = loadSecret(clientId);
@@ -52,6 +53,7 @@ export async function resolveCredential(scopes = DEFAULT_SCOPES) {
     // 3. Fetch a fresh token from APS.
     const token = await getTwoLeggedToken(clientId, clientSecret, scopes);
     setCachedToken(cacheKey, token.access_token, token.expires_in);
-    return { client_id: clientId, access_token: token.access_token, scopes };
+    const freshTtl = getRemainingTtlSeconds(cacheKey) ?? token.expires_in;
+    return { client_id: clientId, access_token: token.access_token, scopes, expires_in_seconds: freshTtl };
 }
 export { APSAuthError };

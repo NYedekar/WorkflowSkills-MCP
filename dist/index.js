@@ -13,6 +13,7 @@ import { processFileSchema, handleProcessFile, } from "./tools/process-file.js";
 import { getWorkflowStatusSchema, handleGetWorkflowStatus, } from "./tools/get-workflow-status.js";
 import { getDownloadLinkSchema, handleGetDownloadLink, } from "./tools/get-download-link.js";
 import { saveToMacSchema, handleSaveToMac, } from "./tools/save-to-mac.js";
+import { renderModelSchema, handleRenderModel, } from "./tools/render-model.js";
 // ─── Server setup ─────────────────────────────────────────────────────────
 const server = new Server({
     name: "mcp-workflow-builder",
@@ -137,7 +138,20 @@ const server = new Server({
         "  • Any file you would otherwise write with bash → save_to_mac\n" +
         "  • Workflow/OSS outputs → NEVER save_to_mac. Use get_result(save_to=...) instead.\n" +
         "  • Binary/OSS outputs (PDF, DWG, RVT, JSON from workflow) → get_result(save_to=...) or get_download_link\n" +
-        "Do NOT use bash for any file write. Do NOT use present_files as a workaround.",
+        "Do NOT use bash for any file write. Do NOT use present_files as a workaround.\n\n" +
+        "── RENDER MODEL ─────────────────────────────────────────────────────────\n\n" +
+        "render_model — view a 3D model as an interactive viewer (experimental) or thumbnail image.\n" +
+        "Requires model to be in APS OSS first (upload_file or process_file).\n\n" +
+        "mode='viewer' (default): saves viewer HTML to ~/Downloads/aps-viewer-{urn}.html and opens it\n" +
+        "  in the system browser via 'open'. Full interactive WebGL — no sandbox restrictions.\n" +
+        "  Returns: { status, file_path, message } — tell the user the browser opened with the file path.\n" +
+        "mode='thumbnail' (RELIABLE): fetches 400×400 PNG, returns as MCP image block inline in chat.\n\n" +
+        "Optional params: region ('US'|'EMEA'), force_retranslate (bool, default false).\n\n" +
+        "STATUS FLOW:\n" +
+        "• pending → translation in progress. Call again in 30–60 s. If >30 min, job timed out — re-upload.\n" +
+        "• success (viewer) → browser opened; surface file_path and token expiry to user.\n" +
+        "• success (thumbnail) → image renders inline.\n" +
+        "• error → show message. Re-upload file if translation failed/timed out.",
 });
 // ─── Tool list ────────────────────────────────────────────────────────────
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -266,6 +280,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     "WHEN TO CALL: automatically after every successful operation that produces a file output — do not wait for the user to ask.",
                 inputSchema: zodToJsonSchema(getDownloadLinkSchema),
             },
+            {
+                name: "render_model",
+                description: "Render an APS model visually — either as an interactive 3D viewer or as a thumbnail image. " +
+                    "Requires the model to already be in APS OSS — upload it with upload_file or process_file first. " +
+                    "Automatically checks for an existing SVF2 translation and starts one if needed. " +
+                    "mode='viewer' (default): generates self-contained HTML with APS Viewer SDK, saves it to " +
+                    "  ~/Downloads/aps-viewer-{urn}.html, and opens it in the user's default browser via 'open'. " +
+                    "  The browser has no sandbox restrictions — full interactive WebGL viewer. " +
+                    "mode='thumbnail' (RELIABLE): returns a 400×400 PNG inline in chat — works regardless of sandbox. " +
+                    "region param: use 'EMEA' for EU data-residency; defaults to 'US'. " +
+                    "force_retranslate param: set true only to redo a corrupt/failed previous translation. " +
+                    "STATUS FLOW: " +
+                    "• pending → translation started or still running; call render_model again in 30–60 s. " +
+                    "  If pending >30 minutes, the job timed out — re-upload and retry. " +
+                    "• success (viewer) → browser opened; tell user file_path and token expiry from message field. " +
+                    "• success (thumbnail) → image renders inline in chat. " +
+                    "• error → show error message; re-upload the file if translation failed or timed out.",
+                inputSchema: zodToJsonSchema(renderModelSchema),
+            },
         ],
     };
 });
@@ -378,6 +411,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return {
                     content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                     isError: result.status === "error",
+                };
+            }
+            case "render_model": {
+                const parsed = renderModelSchema.parse(args);
+                const result = await handleRenderModel(parsed);
+                if (result.status === "error") {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                        isError: true,
+                    };
+                }
+                if (result.status === "pending") {
+                    return {
+                        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                    };
+                }
+                // success — thumbnail returns MCP image block; viewer returns text confirmation
+                if ("thumbnail_base64" in result) {
+                    return {
+                        content: [
+                            {
+                                type: "image",
+                                data: result.thumbnail_base64,
+                                mimeType: result.content_type,
+                            },
+                        ],
+                    };
+                }
+                // viewer: HTML saved to disk and opened in browser — return confirmation message
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                 };
             }
             default:
