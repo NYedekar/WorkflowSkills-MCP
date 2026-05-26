@@ -105,7 +105,7 @@ export async function getSignedDownloadUrl(token, ossUrl // oss://bucketKey/obje
     const slash = withoutScheme.indexOf("/");
     const bucketKey = withoutScheme.slice(0, slash);
     const objectKey = withoutScheme.slice(slash + 1);
-    const res = await fetch(`${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signed?access=read`, {
+    const res = await fetch(`${OSS_BASE}/buckets/${encodeURIComponent(bucketKey)}/objects/${encodeURIComponent(objectKey)}/signed?access=read`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${token}`,

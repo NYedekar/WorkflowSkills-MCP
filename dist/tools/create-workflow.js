@@ -28,6 +28,7 @@ export const createWorkflowSchema = z.object({
     intents: z
         .array(intentSchema)
         .min(1)
+        .max(200)
         .describe("Ordered list of intents extracted from the user request"),
     relationships: z
         .array(relationshipSchema)

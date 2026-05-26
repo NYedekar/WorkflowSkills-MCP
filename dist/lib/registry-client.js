@@ -10,7 +10,14 @@ function registryPath() {
     return resolve(__dir, "../../data/capability-registry.json");
 }
 function buildIndex() {
-    const raw = JSON.parse(readFileSync(registryPath(), "utf-8"));
+    let raw;
+    try {
+        raw = JSON.parse(readFileSync(registryPath(), "utf-8"));
+    }
+    catch (err) {
+        console.error(`[registry-client] Failed to load registry from '${registryPath()}': ${String(err)}`);
+        return [];
+    }
     const domains = raw.domains;
     const records = [];
     for (const domain of domains) {

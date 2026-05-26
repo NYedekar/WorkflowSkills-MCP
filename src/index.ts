@@ -129,7 +129,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "authenticate_aps",
         description:
-          "Verify APS credentials and cache the token. Reads APS_CLIENT_ID and APS_CLIENT_SECRET from the MCP process env — never from tool params. Call once to confirm the connection is healthy.",
+          "Verify APS credentials and cache the token. Reads APS_CLIENT_ID and APS_CLIENT_SECRET from the MCP process env — never from tool params. Call once to confirm the connection is healthy. " +
+          "Note: each distinct set of OAuth scopes produces a separately cached token; if you request a scope set that differs from a previous call, a new token is fetched and cached independently.",
         inputSchema: zodToJsonSchema(authenticateApsSchema),
       },
       {
@@ -142,7 +143,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           "Also call when any Autodesk cloud service is referenced (ACC, BIM 360, Autodesk Docs, Fusion Hub, Vault, APS OSS, ShotGrid, Tandem, Forma, ReCap Cloud). " +
           "Searches 260+ capabilities across Design Automation (Engine-API) and APS REST (Platform-API). " +
           "Returns capability_id and operation_id for process_file. No results = Coverage Gap — do not attempt local fallback. " +
-          "WARNING: Do NOT use the product filter param — it uses internal product ID strings that do not match common names like 'APS' or 'Model Derivative' and returns 0 results. Always search without a product filter.",
+          "Filter by query, capability_id, operation_id, or risk. Use query for natural language search.",
         inputSchema: zodToJsonSchema(getCapabilitySchema),
       },
       {

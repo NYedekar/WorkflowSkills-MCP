@@ -41,7 +41,7 @@ export interface OperationRecord {
   // Custom AppBundle fields — present only on callable=true engine ops
   workItemTemplate?: {
     activityId: string;
-    arguments: Record<string, { url: string; verb: "get" | "put" }>;
+    arguments: Record<string, { verb: "get" | "put" }>;
   };
   activityId?: string;
   workItemArguments?: Record<string, { verb: "get" | "put"; localName?: string; optional?: boolean }>;
@@ -84,7 +84,13 @@ function registryPath(): string {
 }
 
 function buildIndex(): CapabilityRecord[] {
-  const raw = JSON.parse(readFileSync(registryPath(), "utf-8")) as Record<string, unknown>;
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(readFileSync(registryPath(), "utf-8")) as Record<string, unknown>;
+  } catch (err) {
+    console.error(`[registry-client] Failed to load registry from '${registryPath()}': ${String(err)}`);
+    return [];
+  }
   const domains = raw.domains as unknown[];
   const records: CapabilityRecord[] = [];
 

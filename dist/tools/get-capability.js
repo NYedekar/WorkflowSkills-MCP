@@ -16,11 +16,6 @@ export const getCapabilitySchema = z.object({
         .optional()
         .describe("Find by operation ID or globalOperationId. Examples: 'extract-room-data', " +
         "'revit.extract-room-data', 'get_signed_s3_upload'."),
-    product: z
-        .string()
-        .optional()
-        .describe("Filter by product. Engine products: Revit, AutoCAD, Fusion, Inventor, 3dsMax. " +
-        "Platform/REST: APS, ACC, Autodesk Platform Services."),
     risk: z
         .enum(["SAFE", "REVIEW", "BLOCKED"])
         .optional()
@@ -36,10 +31,11 @@ export const getCapabilitySchema = z.object({
 });
 export async function handleGetCapability(input) {
     // If no filters at all, return a helpful message
-    if (!input.query && !input.capability_id && !input.operation_id && !input.product && !input.risk) {
+    if (!input.query && !input.capability_id && !input.operation_id && !input.risk) {
         return {
             count: 0,
             capabilities: [],
+            hint: "Provide at least one filter: query, capability_id, operation_id, or risk. Example: get_capability({ query: 'dwg translate' })",
         };
     }
     let caps;
@@ -53,7 +49,6 @@ export async function handleGetCapability(input) {
             query: input.query,
             capabilityId: input.capability_id,
             operationId: input.operation_id,
-            product: input.product,
             risk: input.risk,
             limit: input.limit,
         });

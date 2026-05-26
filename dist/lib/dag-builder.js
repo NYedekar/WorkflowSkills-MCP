@@ -182,35 +182,46 @@ function detectCycles(nodeIds, edges) {
     for (const id of nodeIds)
         color.set(id, WHITE);
     const cycleEdgeIds = [];
-    function dfs(u) {
-        color.set(u, GRAY);
-        for (const edge of adj.get(u) ?? []) {
-            const v = edge.to;
-            if (color.get(v) === GRAY) {
-                cycleEdgeIds.push(edge.id);
+    // Iterative DFS — avoids call-stack overflow for large graphs.
+    for (const start of nodeIds) {
+        if (color.get(start) !== WHITE)
+            continue;
+        color.set(start, GRAY);
+        const stack = [{ node: start, idx: 0 }];
+        while (stack.length > 0) {
+            const frame = stack[stack.length - 1];
+            const neighbors = adj.get(frame.node) ?? [];
+            if (frame.idx < neighbors.length) {
+                const edge = neighbors[frame.idx++];
+                const vc = color.get(edge.to) ?? WHITE;
+                if (vc === GRAY) {
+                    cycleEdgeIds.push(edge.id);
+                }
+                else if (vc === WHITE) {
+                    color.set(edge.to, GRAY);
+                    stack.push({ node: edge.to, idx: 0 });
+                }
             }
-            else if (color.get(v) === WHITE) {
-                dfs(v);
+            else {
+                color.set(frame.node, BLACK);
+                stack.pop();
             }
         }
-        color.set(u, BLACK);
-    }
-    for (const id of nodeIds) {
-        if (color.get(id) === WHITE)
-            dfs(id);
     }
     return { hasCycles: cycleEdgeIds.length > 0, cycleEdgeIds };
 }
-function breakCycles(edges, cycleEdgeIds) {
-    const cycleSet = new Set(cycleEdgeIds);
-    const cycleEdges = edges
-        .filter((e) => cycleSet.has(e.id))
-        .sort((a, b) => a.confidence - b.confidence);
-    const toRemove = new Set();
-    for (const e of cycleEdges) {
-        toRemove.add(e.id);
+function breakCycles(nodeIds, edges) {
+    let current = edges;
+    // Iteratively remove the lowest-confidence cycle edge until the graph is acyclic.
+    for (;;) {
+        const { hasCycles, cycleEdgeIds } = detectCycles(nodeIds, current);
+        if (!hasCycles)
+            return current;
+        const minEdge = current
+            .filter((e) => cycleEdgeIds.includes(e.id))
+            .reduce((a, b) => (a.confidence <= b.confidence ? a : b));
+        current = current.filter((e) => e.id !== minEdge.id);
     }
-    return edges.filter((e) => !toRemove.has(e.id));
 }
 function topologicalSort(nodeIds, edges) {
     const inDegree = new Map();
@@ -292,10 +303,10 @@ export function buildDAG(intents, relationships, name, description) {
     edges = promotedEdges;
     // 2. Validate edge types & loop structure.
     validateLoopEdges(nodes, edges);
-    // 3. First cycle detection.
-    const { hasCycles, cycleEdgeIds } = detectCycles(nodeIds, edges);
+    // 3. First cycle detection + breaking.
+    const { hasCycles } = detectCycles(nodeIds, edges);
     if (hasCycles)
-        edges = breakCycles(edges, cycleEdgeIds);
+        edges = breakCycles(nodeIds, edges);
     // 4. Post-cycle-break revalidation: ensure cycle removal didn't kill any loop body.
     validatePostCycleBreak(nodes, edges);
     // 5. Enforce after-loop exclusivity convention.
