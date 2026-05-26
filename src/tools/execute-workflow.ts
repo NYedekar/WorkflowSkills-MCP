@@ -428,13 +428,11 @@ async function executeRest(
   }
 
   // Execute HTTP call
+  const restController = new AbortController();
+  const restTimer = setTimeout(() => restController.abort(), 20_000);
   let res: Response;
   try {
-    res = await fetch(fullUrl, {
-      method,
-      headers,
-      body: bodyStr,
-    });
+    res = await fetch(fullUrl, { method, headers, body: bodyStr, signal: restController.signal });
   } catch (err) {
     return {
       status: "error",
@@ -443,6 +441,8 @@ async function executeRest(
       operation: opSummary(op),
       error: `Network error: ${String(err)}`,
     };
+  } finally {
+    clearTimeout(restTimer);
   }
 
   const durationMs = Date.now() - t0;
@@ -483,7 +483,8 @@ async function executeRest(
     const opSlug = op.operationId.replace(/[^a-zA-Z0-9-]/g, "-").slice(0, 40);
     const sizeKb = (responseSize / 1024).toFixed(0);
 
-    responseOssUrl = await storeResponseInOss(responseJson, opSlug) ?? undefined;
+    const ossTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 25_000));
+    responseOssUrl = await Promise.race([storeResponseInOss(responseJson, opSlug), ossTimeout]) ?? undefined;
 
     if (responseOssUrl) {
       effectiveResponseBody =

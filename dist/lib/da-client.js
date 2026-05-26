@@ -2,6 +2,19 @@
 const DA_REGION = process.env.APS_DA_REGION ?? "us-east";
 const DA_BASE = `https://developer.api.autodesk.com/da/${DA_REGION}/v3`;
 const OSS_BASE = "https://developer.api.autodesk.com/oss/v2";
+// ── Timeout-aware fetch ───────────────────────────────────────────────────
+// Every APS/S3 call must have a deadline. Without one, a stalled TCP connection
+// hangs the MCP server indefinitely and forces the user to resubmit.
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20_000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
 // ── DA Nickname ───────────────────────────────────────────────────────────
 // One lookup per client_id per process lifetime — nickname never changes.
 const nicknameCache = new Map();
@@ -10,9 +23,9 @@ export async function getNickname(token, clientId) {
     if (cached)
         return cached;
     try {
-        const res = await fetch(`${DA_BASE}/forgeapps/me`, {
+        const res = await fetchWithTimeout(`${DA_BASE}/forgeapps/me`, {
             headers: { Authorization: `Bearer ${token}` },
-        });
+        }, 10_000);
         if (!res.ok)
             return clientId; // fall back silently — better than blocking execution
         const json = (await res.json());
@@ -37,9 +50,9 @@ export class DAError extends Error {
 // ── Activity ──────────────────────────────────────────────────────────────
 export async function getActivity(token, qualifiedActivityId // e.g. "clientId.ActivityName+prod"
 ) {
-    const res = await fetch(`${DA_BASE}/activities/${encodeURIComponent(qualifiedActivityId)}`, {
+    const res = await fetchWithTimeout(`${DA_BASE}/activities/${encodeURIComponent(qualifiedActivityId)}`, {
         headers: { Authorization: `Bearer ${token}` },
-    });
+    }, 15_000);
     if (res.status === 404)
         return null;
     if (!res.ok)
@@ -48,23 +61,23 @@ export async function getActivity(token, qualifiedActivityId // e.g. "clientId.A
 }
 // ── OSS bucket ────────────────────────────────────────────────────────────
 export async function ensureBucket(token, bucketKey, policy = "transient") {
-    const check = await fetch(`${OSS_BASE}/buckets/${bucketKey}/details`, {
+    const check = await fetchWithTimeout(`${OSS_BASE}/buckets/${bucketKey}/details`, {
         headers: { Authorization: `Bearer ${token}` },
-    });
+    }, 15_000);
     if (check.ok)
         return;
     if (check.status !== 404) {
         const body = await check.text();
         throw new DAError(`Bucket check failed: ${body}`, check.status);
     }
-    const create = await fetch(`${OSS_BASE}/buckets`, {
+    const create = await fetchWithTimeout(`${OSS_BASE}/buckets`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({ bucketKey, policyKey: policy }),
-    });
+    }, 15_000);
     if (!create.ok) {
         const body = await create.text();
         throw new DAError(`Create bucket failed: ${body}`, create.status);
@@ -73,7 +86,7 @@ export async function ensureBucket(token, bucketKey, policy = "transient") {
 // ── OSS upload (small payloads — inline data: URL or direct upload) ────────
 export async function uploadJsonToOss(token, bucketKey, objectKey, payload) {
     const body = JSON.stringify(payload);
-    const res = await fetch(`${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}`, {
+    const res = await fetchWithTimeout(`${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}`, {
         method: "PUT",
         headers: {
             Authorization: `Bearer ${token}`,
@@ -81,7 +94,7 @@ export async function uploadJsonToOss(token, bucketKey, objectKey, payload) {
             "Content-Length": Buffer.byteLength(body, "utf-8").toString(),
         },
         body,
-    });
+    }, 30_000);
     if (!res.ok) {
         const err = await res.text();
         throw new DAError(`OSS upload failed: ${err}`, res.status);
@@ -90,14 +103,14 @@ export async function uploadJsonToOss(token, bucketKey, objectKey, payload) {
 }
 // ── WorkItem ──────────────────────────────────────────────────────────────
 export async function submitWorkItem(token, activityId, args) {
-    const res = await fetch(`${DA_BASE}/workitems`, {
+    const res = await fetchWithTimeout(`${DA_BASE}/workitems`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({ activityId, arguments: args }),
-    });
+    }, 20_000);
     if (!res.ok) {
         const body = await res.text();
         throw new DAError(`Submit workitem failed: ${body}`, res.status, body);
@@ -108,9 +121,9 @@ export async function submitWorkItem(token, activityId, args) {
 export async function pollWorkItem(token, workItemId, timeoutMs = 120_000, intervalMs = 3_000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const res = await fetch(`${DA_BASE}/workitems/${workItemId}`, {
+        const res = await fetchWithTimeout(`${DA_BASE}/workitems/${workItemId}`, {
             headers: { Authorization: `Bearer ${token}` },
-        });
+        }, 10_000);
         if (!res.ok)
             throw new DAError(`Poll workitem failed: ${res.statusText}`, res.status);
         const item = (await res.json());
@@ -127,14 +140,14 @@ export async function getSignedDownloadUrl(token, ossUrl // oss://bucketKey/obje
     const slash = withoutScheme.indexOf("/");
     const bucketKey = withoutScheme.slice(0, slash);
     const objectKey = withoutScheme.slice(slash + 1);
-    const res = await fetch(`${OSS_BASE}/buckets/${encodeURIComponent(bucketKey)}/objects/${encodeURIComponent(objectKey)}/signed?access=read`, {
+    const res = await fetchWithTimeout(`${OSS_BASE}/buckets/${encodeURIComponent(bucketKey)}/objects/${encodeURIComponent(objectKey)}/signed?access=read`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({}),
-    });
+    }, 15_000);
     if (!res.ok) {
         const err = await res.text();
         throw new DAError(`Get signed URL failed: ${err}`, res.status);
@@ -152,9 +165,9 @@ export async function getSignedS3DownloadUrl(token, ossUrl // oss://bucketKey/ob
     const slash = withoutScheme.indexOf("/");
     const bucketKey = withoutScheme.slice(0, slash);
     const objectKey = withoutScheme.slice(slash + 1);
-    const res = await fetch(`${OSS_BASE}/buckets/${encodeURIComponent(bucketKey)}/objects/${encodeURIComponent(objectKey)}/signeds3download`, {
+    const res = await fetchWithTimeout(`${OSS_BASE}/buckets/${encodeURIComponent(bucketKey)}/objects/${encodeURIComponent(objectKey)}/signeds3download`, {
         headers: { Authorization: `Bearer ${token}` },
-    });
+    }, 15_000);
     if (!res.ok) {
         const body = await res.text();
         throw new DAError(`Get signed S3 download URL failed: ${body}`, res.status);
@@ -169,9 +182,9 @@ export async function getSignedS3DownloadUrl(token, ossUrl // oss://bucketKey/ob
 export async function getSignedS3UploadUrl(token, bucketKey, objectKey, minutesExpiration = 60) {
     const url = `${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signeds3upload` +
         `?minutesExpiration=${minutesExpiration}`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
         headers: { Authorization: `Bearer ${token}` },
-    });
+    }, 15_000);
     if (!res.ok) {
         const body = await res.text();
         throw new DAError(`Get signed S3 upload URL failed: ${body}`, res.status);
@@ -179,25 +192,25 @@ export async function getSignedS3UploadUrl(token, bucketKey, objectKey, minutesE
     return res.json();
 }
 export async function uploadToS3(signedUrl, fileBuffer, contentType) {
-    const res = await fetch(signedUrl, {
+    const res = await fetchWithTimeout(signedUrl, {
         method: "PUT",
         headers: { "Content-Type": contentType },
         body: fileBuffer,
-    });
+    }, 120_000);
     if (!res.ok) {
         const body = await res.text();
         throw new DAError(`S3 upload failed (HTTP ${res.status}): ${body}`, res.status);
     }
 }
 export async function finalizeS3Upload(token, bucketKey, objectKey, uploadKey) {
-    const res = await fetch(`${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signeds3upload`, {
+    const res = await fetchWithTimeout(`${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signeds3upload`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({ uploadKey }),
-    });
+    }, 20_000);
     if (!res.ok) {
         const body = await res.text();
         throw new DAError(`Finalize S3 upload failed: ${body}`, res.status);

@@ -179,11 +179,16 @@ export async function handleGetResult(input) {
     if (input.save_to) {
         const filename = input.save_filename ?? (objectKey.split("/").pop() ?? objectKey);
         let saveRes;
+        const saveController = new AbortController();
+        const saveTimer = setTimeout(() => saveController.abort(), 120_000);
         try {
-            saveRes = await fetch(signedUrl);
+            saveRes = await fetch(signedUrl, { signal: saveController.signal });
         }
         catch (err) {
             return { status: "error", error: `Network error downloading full file: ${String(err)}` };
+        }
+        finally {
+            clearTimeout(saveTimer);
         }
         if (!saveRes.ok) {
             const body = await saveRes.text().catch(() => "");
@@ -215,13 +220,19 @@ export async function handleGetResult(input) {
     const startByte = input.offset_chars;
     const endByte = startByte + input.max_chars * 4 + 512 - 1;
     let res;
+    const rangeController = new AbortController();
+    const rangeTimer = setTimeout(() => rangeController.abort(), 30_000);
     try {
         res = await fetch(signedUrl, {
             headers: { Range: `bytes=${startByte}-${endByte}` },
+            signal: rangeController.signal,
         });
     }
     catch (err) {
         return { status: "error", error: `Network error fetching from S3: ${String(err)}` };
+    }
+    finally {
+        clearTimeout(rangeTimer);
     }
     // S3 returns 206 for partial content, 200 if the file is smaller than the range end.
     if (res.status !== 206 && res.status !== 200) {

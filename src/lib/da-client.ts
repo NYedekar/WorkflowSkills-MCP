@@ -4,6 +4,24 @@ const DA_REGION = process.env.APS_DA_REGION ?? "us-east";
 const DA_BASE = `https://developer.api.autodesk.com/da/${DA_REGION}/v3`;
 const OSS_BASE = "https://developer.api.autodesk.com/oss/v2";
 
+// ── Timeout-aware fetch ───────────────────────────────────────────────────
+// Every APS/S3 call must have a deadline. Without one, a stalled TCP connection
+// hangs the MCP server indefinitely and forces the user to resubmit.
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 20_000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export interface WorkItemArgument {
@@ -22,9 +40,9 @@ export async function getNickname(token: string, clientId: string): Promise<stri
   const cached = nicknameCache.get(clientId);
   if (cached) return cached;
   try {
-    const res = await fetch(`${DA_BASE}/forgeapps/me`, {
+    const res = await fetchWithTimeout(`${DA_BASE}/forgeapps/me`, {
       headers: { Authorization: `Bearer ${token}` },
-    });
+    }, 10_000);
     if (!res.ok) return clientId; // fall back silently — better than blocking execution
     const json = (await res.json()) as { nickname?: string; id?: string };
     const nickname = json.nickname ?? json.id ?? clientId;
@@ -68,9 +86,9 @@ export async function getActivity(
   token: string,
   qualifiedActivityId: string // e.g. "clientId.ActivityName+prod"
 ): Promise<unknown | null> {
-  const res = await fetch(`${DA_BASE}/activities/${encodeURIComponent(qualifiedActivityId)}`, {
+  const res = await fetchWithTimeout(`${DA_BASE}/activities/${encodeURIComponent(qualifiedActivityId)}`, {
     headers: { Authorization: `Bearer ${token}` },
-  });
+  }, 15_000);
   if (res.status === 404) return null;
   if (!res.ok) throw new DAError(`GET activity failed: ${res.statusText}`, res.status);
   return res.json();
@@ -83,22 +101,22 @@ export async function ensureBucket(
   bucketKey: string,
   policy: "transient" | "temporary" | "persistent" = "transient"
 ): Promise<void> {
-  const check = await fetch(`${OSS_BASE}/buckets/${bucketKey}/details`, {
+  const check = await fetchWithTimeout(`${OSS_BASE}/buckets/${bucketKey}/details`, {
     headers: { Authorization: `Bearer ${token}` },
-  });
+  }, 15_000);
   if (check.ok) return;
   if (check.status !== 404) {
     const body = await check.text();
     throw new DAError(`Bucket check failed: ${body}`, check.status);
   }
-  const create = await fetch(`${OSS_BASE}/buckets`, {
+  const create = await fetchWithTimeout(`${OSS_BASE}/buckets`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ bucketKey, policyKey: policy }),
-  });
+  }, 15_000);
   if (!create.ok) {
     const body = await create.text();
     throw new DAError(`Create bucket failed: ${body}`, create.status);
@@ -114,7 +132,7 @@ export async function uploadJsonToOss(
   payload: unknown
 ): Promise<string> {
   const body = JSON.stringify(payload);
-  const res = await fetch(`${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}`, {
+  const res = await fetchWithTimeout(`${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}`, {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -122,7 +140,7 @@ export async function uploadJsonToOss(
       "Content-Length": Buffer.byteLength(body, "utf-8").toString(),
     },
     body,
-  });
+  }, 30_000);
   if (!res.ok) {
     const err = await res.text();
     throw new DAError(`OSS upload failed: ${err}`, res.status);
@@ -137,14 +155,14 @@ export async function submitWorkItem(
   activityId: string,
   args: Record<string, WorkItemArgument>
 ): Promise<string> {
-  const res = await fetch(`${DA_BASE}/workitems`, {
+  const res = await fetchWithTimeout(`${DA_BASE}/workitems`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ activityId, arguments: args }),
-  });
+  }, 20_000);
 
   if (!res.ok) {
     const body = await res.text();
@@ -164,9 +182,9 @@ export async function pollWorkItem(
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const res = await fetch(`${DA_BASE}/workitems/${workItemId}`, {
+    const res = await fetchWithTimeout(`${DA_BASE}/workitems/${workItemId}`, {
       headers: { Authorization: `Bearer ${token}` },
-    });
+    }, 10_000);
     if (!res.ok) throw new DAError(`Poll workitem failed: ${res.statusText}`, res.status);
 
     const item = (await res.json()) as WorkItemResult;
@@ -190,7 +208,7 @@ export async function getSignedDownloadUrl(
   const bucketKey = withoutScheme.slice(0, slash);
   const objectKey = withoutScheme.slice(slash + 1);
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${OSS_BASE}/buckets/${encodeURIComponent(bucketKey)}/objects/${encodeURIComponent(objectKey)}/signed?access=read`,
     {
       method: "POST",
@@ -199,7 +217,8 @@ export async function getSignedDownloadUrl(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({}),
-    }
+    },
+    15_000
   );
 
   if (!res.ok) {
@@ -224,11 +243,12 @@ export async function getSignedS3DownloadUrl(
   const bucketKey = withoutScheme.slice(0, slash);
   const objectKey = withoutScheme.slice(slash + 1);
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${OSS_BASE}/buckets/${encodeURIComponent(bucketKey)}/objects/${encodeURIComponent(objectKey)}/signeds3download`,
     {
       headers: { Authorization: `Bearer ${token}` },
-    }
+    },
+    15_000
   );
 
   if (!res.ok) {
@@ -260,9 +280,9 @@ export async function getSignedS3UploadUrl(
     `${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signeds3upload` +
     `?minutesExpiration=${minutesExpiration}`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
-  });
+  }, 15_000);
 
   if (!res.ok) {
     const body = await res.text();
@@ -273,11 +293,11 @@ export async function getSignedS3UploadUrl(
 }
 
 export async function uploadToS3(signedUrl: string, fileBuffer: Buffer, contentType: string): Promise<void> {
-  const res = await fetch(signedUrl, {
+  const res = await fetchWithTimeout(signedUrl, {
     method: "PUT",
     headers: { "Content-Type": contentType },
     body: fileBuffer as unknown as BodyInit,
-  });
+  }, 120_000);
 
   if (!res.ok) {
     const body = await res.text();
@@ -291,7 +311,7 @@ export async function finalizeS3Upload(
   objectKey: string,
   uploadKey: string
 ): Promise<void> {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signeds3upload`,
     {
       method: "POST",
@@ -300,7 +320,8 @@ export async function finalizeS3Upload(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ uploadKey }),
-    }
+    },
+    20_000
   );
 
   if (!res.ok) {
