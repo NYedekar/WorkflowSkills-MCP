@@ -102,9 +102,40 @@ const server = new Server(
       "If get_capability returns a result where callable=false or callable is not true, you MUST:\n" +
       "  1. Call get_capability AGAIN with a rephrased or broader query (e.g. swap synonyms, drop the file extension, try the intent alone).\n" +
       "  2. Call get_capability a THIRD time with limit=10 to surface less-obvious matches.\n" +
-      "  3. Only after all three searches return no callable=true result, tell the user the operation is not yet supported and show what was searched.\n" +
-      "NEVER fall back to bash, Python, local libraries, or any non-MCP approach after seeing callable=false. " +
-      "The registry has 260+ capabilities — a better query almost always finds a callable alternative.\n\n" +
+      "  3. If the intent is metadata/property/geometry extraction AND the file is one of the supported types below,\n" +
+      "     use the MODEL DERIVATIVE FALLBACK (see section below) — do NOT tell the user it is unsupported.\n" +
+      "  4. Only after steps 1–3 all fail, tell the user the operation is not yet supported and show what was searched.\n" +
+      "NEVER fall back to bash, Python, local libraries, or any non-MCP approach after seeing callable=false.\n\n" +
+
+      "── MODEL DERIVATIVE FALLBACK (metadata & property extraction) ───────────\n\n" +
+      "When DA extraction capabilities are callable=false, use Model Derivative (APS REST) as a fallback.\n" +
+      "Supported file types: DWG, DXF (AutoCAD) · RVT (Revit) · F3D, F3Z (Fusion 360) · IPT, IAM, IDW (Inventor) · MAX (3ds Max)\n\n" +
+      "STANDARD MD EXTRACTION FLOW — execute these steps in order:\n" +
+      "  Step 1 · Upload file (if not already in OSS) → get oss_url\n" +
+      "  Step 2 · execute_workflow(capability_id='aps:md.jobs', operation_id='start_translation_job', input_file_url=oss_url)\n" +
+      "           → returns urn. If asyncJob=true, poll fetch_manifest until status='success'.\n" +
+      "  Step 3 · execute_workflow(capability_id='aps:md.manifest', operation_id='fetch_manifest', path_params={urn})\n" +
+      "           → confirms translation complete. DO NOT use GUIDs from this manifest for metadata calls.\n" +
+      "  Step 4 · execute_workflow(capability_id='aps:md.metadata', operation_id='list_model_views', path_params={urn})\n" +
+      "           → returns correct modelGuids. ALWAYS use these GUIDs — manifest geometry GUIDs are different and will 404.\n" +
+      "  Step 5a · execute_workflow(capability_id='aps:md.metadata', operation_id='fetch_object_tree', path_params={urn, modelGuid})\n" +
+      "            → entity/layer/component hierarchy.\n" +
+      "  Step 5b · execute_workflow(capability_id='aps:md.metadata', operation_id='query_specific_properties',\n" +
+      "            path_params={urn, modelGuid}, body={query:{$prefix:['CategoryName']}})\n" +
+      "            → filtered properties by category. PREFER this over fetch_all_properties to avoid 1MB limit.\n" +
+      "  Step 5c · execute_workflow(capability_id='aps:md.thumbnail', operation_id='fetch_thumbnail', path_params={urn})\n" +
+      "            → PNG preview. Use get_download_link on the result.\n\n" +
+      "WHAT MD COVERS vs GAPS PER PRODUCT:\n" +
+      "  DWG/DXF   COVERS: entity hierarchy, element properties, layer structure, 2D/3D views\n" +
+      "            GAPS:   xref list, block attributes, drawing history, symbol tables, title block data\n" +
+      "  RVT       COVERS: BIM element tree, all Revit parameters, room/space/level data (via properties)\n" +
+      "            GAPS:   native Revit warnings, family metadata, workshared structure (use RevitExtractor for those)\n" +
+      "  F3D/F3Z   COVERS: component hierarchy, body/face properties, assembly structure\n" +
+      "            GAPS:   CAM setups, toolpaths, generative design outcomes, simulation results\n" +
+      "  IPT/IAM   COVERS: part/assembly hierarchy, component properties, mass/material data\n" +
+      "            GAPS:   iProperties, BOM tables, frame/tube reports, FEA results\n" +
+      "  MAX       COVERS: scene object hierarchy, material assignments, mesh properties\n" +
+      "            GAPS:   modifier stacks, animation data, render settings\n\n" +
 
       "── STATUS HANDLING (process_file and execute_workflow) ──────────────────\n\n" +
       "• success         → present outputs. Done.\n" +
