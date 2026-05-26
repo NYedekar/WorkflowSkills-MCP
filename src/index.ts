@@ -176,6 +176,15 @@ const server = new Server(
       "PIPELINES: always render the ASCII diagram from create_workflow verbatim in a fenced code block.\n" +
       "PURE INFO (no file, no operation): answer directly — do not call any tool.\n\n" +
 
+      "── AUTO RENDER MODEL ────────────────────────────────────────────────────\n\n" +
+      "After ANY successful SVF2 translation — whether from:\n" +
+      "  • execute_workflow(operation_id='start_translation_job') confirming status=success\n" +
+      "  • render_model returning status=pending then being polled to success\n" +
+      "  • the MD FALLBACK flow completing a translation\n" +
+      "ALWAYS automatically call render_model(oss_url=<original_input_oss_url>, mode='viewer') immediately after. " +
+      "Do NOT wait for the user to ask. This opens the model in the browser so the user can view it interactively. " +
+      "If render_model returns status='pending', poll it again in ~30s until success.\n\n" +
+
       "── FILE DOWNLOAD ────────────────────────────────────────────────────────\n\n" +
       "After any successful operation that produces an output file, call get_download_link(oss_url=...) " +
       "and render the returned markdown_link directly in your response so the user can click to download. " +
