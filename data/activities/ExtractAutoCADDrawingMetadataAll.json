@@ -19,7 +19,7 @@
   "appbundles": ["{NICKNAME}.AutoCADDrawingMetadataExtractor+prod"],
   "settings": {
     "script": {
-      "data": "ExtractAllDrawingMetadata\n"
+      "value": "EXTRACTALLDRAWINGMETADATA\n"
     }
   }
 }
