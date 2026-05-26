@@ -4,6 +4,10 @@
 
 WorkflowSkills MCP is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that connects Claude directly to Autodesk Platform Services (APS). Drop a DWG, RVT, IPT, IFC, or any other Autodesk file into a conversation and ask Claude to translate it, extract its data, run cloud processing jobs, or call APS REST APIs — all in plain language.
 
+Video: <iframe src="https://myshare.autodesk.com/personal/neeraj_yedekar_autodesk_com/_layouts/15/embed.aspx?UniqueId=6607e9ad-ef75-4fdd-86a8-06bde078a0ca&nav=%7B%22playbackOptions%22%3A%7B%22startTimeInSeconds%22%3A0%7D%7D&embed=%7B%22ust%22%3Atrue%2C%22hv%22%3A%22CopyEmbedCode%22%7D&referrer=StreamWebApp&referrerScenario=EmbedDialog.Create" width="853" height="480" frameborder="0" scrolling="no" allowfullscreen title="WorkflowBuilde_MCP_ClaudeDesktop_Video.mov"></iframe>
+
+
+
 ---
 
 ## Quick Start
