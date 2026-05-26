@@ -19,13 +19,28 @@ Supported file types: `RVT RFA DWG DXF DWF DWFX IPT IAM IDW F3D NWD NWC IFC FBX 
 |---|---|
 | `get_capability` | Search 260+ capabilities across Design Automation and APS REST APIs |
 | `authenticate_aps` | Verify APS credentials and cache a token |
-| `process_file` | One-call workflow: upload → translate/run → return results |
-| `execute_workflow` | Run a specific capability operation (REST call or DA WorkItem) |
-| `upload_file` | Upload a local file to APS OSS |
+| `process_file` | Fast path for a **single intent + local file**: upload → run → return results in one call. Use when no planning or pipeline is needed. |
+| `create_workflow` | **Multiple intents**: decompose a request into a DAG of steps, plan execution order (sequential, parallel, conditional), and render an ASCII pipeline diagram. Does not execute — use `execute_workflow` to run each step. |
+| `execute_workflow` | Run a single capability operation (REST call or DA WorkItem) against a file already in APS OSS |
+| `upload_file` | Upload a local file to APS OSS and return an `oss://` URL for use in subsequent steps |
 | `get_result` | Download output from APS OSS after a job completes |
 | `get_workflow_status` | Poll a running DA WorkItem |
-| `create_workflow` | Build a multi-step pipeline across capabilities |
 | `export_workflow` | Export a pipeline definition |
+
+### When to use which tool
+
+```
+Single intent + local file?
+  └─ process_file                          ← zero setup, one call, done
+
+Multiple intents or complex pipeline?
+  └─ create_workflow                       ← plan the DAG and review it
+       └─ upload_file                      ← upload the local file once
+            └─ execute_workflow × N        ← run each step against the OSS URL
+
+Single operation, file already in APS OSS?
+  └─ execute_workflow                      ← skip upload, run directly
+```
 
 ## Prerequisites
 
