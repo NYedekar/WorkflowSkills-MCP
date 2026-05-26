@@ -108,8 +108,15 @@ const server = new Server(
       "NEVER fall back to bash, Python, local libraries, or any non-MCP approach after seeing callable=false.\n\n" +
 
       "── MODEL DERIVATIVE FALLBACK (metadata & property extraction) ───────────\n\n" +
-      "When DA extraction capabilities are callable=false, use Model Derivative (APS REST) as a fallback.\n" +
-      "Supported file types: DWG, DXF (AutoCAD) · RVT (Revit) · F3D, F3Z (Fusion 360) · IPT, IAM, IDW (Inventor) · MAX (3ds Max)\n\n" +
+      "When DA extraction capabilities are callable=false, use Model Derivative (APS REST) as a fallback.\n\n" +
+      "SUPPORTED FORMATS — full object tree + properties:\n" +
+      "  Autodesk native : DWG, DXF (AutoCAD) · RVT, RFA (Revit) · F3D, F3Z (Fusion 360)\n" +
+      "                    IPT, IAM, IDW (Inventor) · MAX (3ds Max) · DWF, DWFX · NWD, NWC (Navisworks)\n" +
+      "  Open/neutral    : IFC · STEP, STP · IGES, IGS · JT · SAT (ACIS) · OBJ · STL · 3DM (Rhino) · SKP (SketchUp)\n" +
+      "  Third-party CAD : SLDPRT, SLDASM (SolidWorks) · CATPART, CATPRODUCT (CATIA)\n" +
+      "                    PRT, ASM (NX/Unigraphics) · PRT, ASM (Creo/Pro-E) · WIRE (Alias)\n" +
+      "  Point clouds    : RCP, RCS (ReCap) — scan metadata only, no BIM properties\n" +
+      "  Geometry-only   : STL, OBJ — mesh + material names, no element properties\n\n" +
       "STANDARD MD EXTRACTION FLOW — execute these steps in order:\n" +
       "  Step 1 · Upload file (if not already in OSS) → get oss_url\n" +
       "  Step 2 · execute_workflow(capability_id='aps:md.jobs', operation_id='start_translation_job', input_file_url=oss_url)\n" +
@@ -126,16 +133,32 @@ const server = new Server(
       "  Step 5c · execute_workflow(capability_id='aps:md.thumbnail', operation_id='fetch_thumbnail', path_params={urn})\n" +
       "            → PNG preview. Use get_download_link on the result.\n\n" +
       "WHAT MD COVERS vs GAPS PER PRODUCT:\n" +
-      "  DWG/DXF   COVERS: entity hierarchy, element properties, layer structure, 2D/3D views\n" +
-      "            GAPS:   xref list, block attributes, drawing history, symbol tables, title block data\n" +
-      "  RVT       COVERS: BIM element tree, all Revit parameters, room/space/level data (via properties)\n" +
-      "            GAPS:   native Revit warnings, family metadata, workshared structure (use RevitExtractor for those)\n" +
-      "  F3D/F3Z   COVERS: component hierarchy, body/face properties, assembly structure\n" +
-      "            GAPS:   CAM setups, toolpaths, generative design outcomes, simulation results\n" +
-      "  IPT/IAM   COVERS: part/assembly hierarchy, component properties, mass/material data\n" +
-      "            GAPS:   iProperties, BOM tables, frame/tube reports, FEA results\n" +
-      "  MAX       COVERS: scene object hierarchy, material assignments, mesh properties\n" +
-      "            GAPS:   modifier stacks, animation data, render settings\n\n" +
+      "  DWG/DXF        COVERS: entity hierarchy, element properties, layer structure, 2D/3D views\n" +
+      "                 GAPS:   xref list, block attributes, drawing history, symbol tables, title block data\n" +
+      "  RVT/RFA        COVERS: full BIM element tree, all Revit parameters, room/space/level data\n" +
+      "                 GAPS:   native warnings, family metadata, workshared structure (use RevitExtractor for those)\n" +
+      "  F3D/F3Z        COVERS: component hierarchy, body/face properties, assembly structure\n" +
+      "                 GAPS:   CAM setups, toolpaths, generative design outcomes, simulation results\n" +
+      "  IPT/IAM/IDW    COVERS: part/assembly hierarchy, component properties, mass/material data\n" +
+      "                 GAPS:   iProperties, BOM tables, frame/tube reports, FEA results\n" +
+      "  MAX            COVERS: scene object hierarchy, material assignments, mesh properties\n" +
+      "                 GAPS:   modifier stacks, animation data, render settings\n" +
+      "  NWD/NWC        COVERS: aggregated model tree, object properties, clash data structure\n" +
+      "                 GAPS:   timeliner sequences, quantification data\n" +
+      "  IFC            COVERS: full BIM element tree, IFC property sets, spatial structure\n" +
+      "                 GAPS:   IFC-specific relationship types beyond spatial containment\n" +
+      "  SLDPRT/SLDASM  COVERS: part/assembly tree, feature names, material data\n" +
+      "                 GAPS:   design tables, configurations, equations\n" +
+      "  CATPART/CATPRD COVERS: part/product tree, component properties\n" +
+      "                 GAPS:   knowledge patterns, DMU navigator data\n" +
+      "  NX/Creo PRT    COVERS: part/assembly hierarchy, body/face properties\n" +
+      "                 GAPS:   parametric expressions, manufacturing attributes\n" +
+      "  STEP/IGES/JT   COVERS: geometry entity hierarchy, basic attributes\n" +
+      "                 GAPS:   application-specific metadata beyond geometry\n" +
+      "  SKP/3DM        COVERS: layer/component hierarchy, material names\n" +
+      "                 GAPS:   plugin-specific metadata, render materials\n" +
+      "  STL/OBJ        COVERS: mesh geometry only\n" +
+      "                 GAPS:   no element properties extractable\n\n" +
 
       "── STATUS HANDLING (process_file and execute_workflow) ──────────────────\n\n" +
       "• success         → present outputs. Done.\n" +
