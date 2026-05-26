@@ -191,13 +191,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "create_workflow": {
         const parsed = createWorkflowSchema.parse(args);
-        const { rendered, dag } = await handleCreateWorkflow(parsed);
-        return {
-          content: [
-            { type: "text" as const, text: rendered },
-            { type: "text" as const, text: JSON.stringify(dag, null, 2) },
-          ],
-        };
+        const result = await handleCreateWorkflow(parsed);
+        if (result.status === "bridge_required") {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          };
+        }
+        if (result.status === "error") {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          };
+        }
+        const parts: { type: "text"; text: string }[] = [
+          { type: "text" as const, text: result.rendered },
+          { type: "text" as const, text: JSON.stringify(result.dag, null, 2) },
+        ];
+        if (result.oss_url) {
+          parts.push({
+            type: "text" as const,
+            text: `File uploaded. oss_url: ${result.oss_url} — pass this to each execute_workflow call as input_file_url.`,
+          });
+        }
+        return { content: parts };
       }
       case "export_workflow": {
         const parsed = exportWorkflowSchema.parse(args);
