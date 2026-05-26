@@ -32,6 +32,8 @@ function accountKey(clientId: string, field: "secret" | "refresh"): string {
   return `${clientId}:${field}`;
 }
 
+// ── Client Secret ─────────────────────────────────────────────────────────
+
 export function storeSecret(clientId: string, clientSecret: string): boolean {
   const mod = tryLoadKeyring();
   if (!mod) return false;
@@ -60,6 +62,43 @@ export function deleteSecret(clientId: string): boolean {
   if (!mod) return false;
   try {
     const entry = new mod.Entry(SERVICE, accountKey(clientId, "secret"));
+    entry.deletePassword();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Refresh Token (3LO) ───────────────────────────────────────────────────
+
+export function storeRefreshToken(clientId: string, refreshToken: string): boolean {
+  const mod = tryLoadKeyring();
+  if (!mod) return false;
+  try {
+    const entry = new mod.Entry(SERVICE, accountKey(clientId, "refresh"));
+    entry.setPassword(refreshToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadRefreshToken(clientId: string): string | null {
+  const mod = tryLoadKeyring();
+  if (!mod) return null;
+  try {
+    const entry = new mod.Entry(SERVICE, accountKey(clientId, "refresh"));
+    return entry.getPassword();
+  } catch {
+    return null;
+  }
+}
+
+export function deleteRefreshToken(clientId: string): boolean {
+  const mod = tryLoadKeyring();
+  if (!mod) return false;
+  try {
+    const entry = new mod.Entry(SERVICE, accountKey(clientId, "refresh"));
     entry.deletePassword();
     return true;
   } catch {

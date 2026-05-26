@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { fileURLToPath } from "url";
-import { resolveCredential, DEFAULT_SCOPES } from "../auth/credential-resolver.js";
+import { resolveCredential, resolve3LOCredential, DEFAULT_SCOPES } from "../auth/credential-resolver.js";
 import { findCapabilityById, findOperationByGlobalId } from "../lib/registry-client.js";
 import { getActivity, createActivity, createActivityAlias, getNickname, ensureBucket, uploadJsonToOss, submitWorkItem, pollWorkItem, getSignedDownloadUrl, getSignedS3UploadUrl, uploadToS3, finalizeS3Upload, DAError, } from "../lib/da-client.js";
 // getSignedDownloadUrl is used for oss:// → signed HTTPS input URL conversion (DA WorkItem inputs)
@@ -229,36 +229,40 @@ async function executeRest(cap, op, input, t0) {
             hint: "Use the Autodesk Viewer SDK (autodesk.com/viewer) in your browser or front-end application.",
         };
     }
-    // Resolve bearer token
+    // Resolve bearer token — priority: explicit bearer_token > 3LO user token > 2LO app token
     let token;
     if (input.bearer_token) {
         token = input.bearer_token;
     }
-    else if (flows.length === 0 || flows.includes("2LO-client-credentials")) {
-        // Auto-mint 2LO token with the op's declared scopes (authFlows are flow names, not scopes)
+    else {
         const scopes = resolveScopes(op.authScopes ?? [], DEFAULT_SCOPES);
-        try {
-            const cred = await resolveCredential(scopes);
-            token = cred.access_token;
+        const cred3lo = await resolve3LOCredential(scopes);
+        if (cred3lo) {
+            token = cred3lo.access_token;
         }
-        catch (err) {
+        else if (flows.length === 0 || flows.includes("2LO-client-credentials")) {
+            try {
+                const cred = await resolveCredential(scopes);
+                token = cred.access_token;
+            }
+            catch (err) {
+                return {
+                    status: "error",
+                    error: `APS auth failed: ${String(err)}`,
+                    hint: "Run authenticate_aps first, or provide a bearer_token for this operation.",
+                };
+            }
+        }
+        else {
             return {
                 status: "error",
-                error: `APS auth failed: ${String(err)}`,
-                hint: "Run authenticate_aps first, or provide a bearer_token for this operation.",
+                capability: capSummary(cap),
+                operation: opSummary(op),
+                error: `Operation '${op.operationId}' requires user-delegated auth (${flows.join(", ")}) and cannot be auto-executed.`,
+                hint: `Provide a 'bearer_token' obtained via the ${flows.join(" / ")} flow. ` +
+                    `Required scopes: ${(op.authScopes ?? []).join(", ") || "(none listed)"}.`,
             };
         }
-    }
-    else {
-        // 3LO-only — need caller-supplied token
-        return {
-            status: "error",
-            capability: capSummary(cap),
-            operation: opSummary(op),
-            error: `Operation '${op.operationId}' requires user-delegated auth (${flows.join(", ")}) and cannot be auto-executed.`,
-            hint: `Provide a 'bearer_token' obtained via the ${flows.join(" / ")} flow. ` +
-                `Required scopes: ${(op.authScopes ?? []).join(", ") || "(none listed)"}.`,
-        };
     }
     // Build URL
     const { url, unusedParams } = buildUrl(op.endpoint ?? "", input.path_params ?? {}, input.query_params ?? {});
