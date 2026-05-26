@@ -12,6 +12,7 @@ import { getResultSchema, handleGetResult, } from "./tools/get-result.js";
 import { processFileSchema, handleProcessFile, } from "./tools/process-file.js";
 import { getWorkflowStatusSchema, handleGetWorkflowStatus, } from "./tools/get-workflow-status.js";
 import { getDownloadLinkSchema, handleGetDownloadLink, } from "./tools/get-download-link.js";
+import { saveToMacSchema, handleSaveToMac, } from "./tools/save-to-mac.js";
 // ─── Server setup ─────────────────────────────────────────────────────────
 const server = new Server({
     name: "mcp-workflow-builder",
@@ -57,7 +58,13 @@ const server = new Server({
         "After any successful operation that produces an output file, call get_download_link(oss_url=...) " +
         "and render the returned markdown_link directly in your response so the user can click to download. " +
         "Always pass a clean filename via the filename param (e.g. 'drawing.pdf', not the full OSS key). " +
-        "Links expire in ~1 hour — note this to the user.",
+        "Links expire in ~1 hour — note this to the user.\n\n" +
+        "── SAVING DATA TO MAC ───────────────────────────────────────────────────\n\n" +
+        "CRITICAL: Claude's bash environment is sandboxed — it CANNOT write files to the Mac filesystem. " +
+        "cp, mv, tee, write, or any bash file-write to /Users/... will FAIL silently or with permission errors. " +
+        "To save any content (JSON, CSV, Markdown, aggregated results) to the Mac, ALWAYS use save_to_mac. " +
+        "This includes: assembled metadata, summarized property dumps, multi-call aggregations, any synthesized output. " +
+        "Never attempt bash file writes to Mac paths.",
 });
 // ─── Tool list ────────────────────────────────────────────────────────────
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -160,6 +167,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     "• failed / cancelled → show error + reportUrl to user. " +
                     "Generic — handles DA WorkItems today, extensible to Model Derivative, ACC jobs, and other async APS operations.",
                 inputSchema: zodToJsonSchema(getWorkflowStatusSchema),
+            },
+            {
+                name: "save_to_mac",
+                description: "Save text content (JSON, CSV, Markdown, plain text) directly to the Mac filesystem via the MCP server. " +
+                    "CRITICAL: Claude's bash is sandboxed and CANNOT write to Mac disk (/Users/...). " +
+                    "Use this tool whenever you need to save synthesized, aggregated, or assembled data to the Mac — " +
+                    "e.g. metadata JSON built from multiple API calls, property summaries, extracted reports. " +
+                    "Also use when execute_workflow auto-saves a large response and you want to save a processed/filtered version. " +
+                    "Returns saved_to with the resolved file path on success.",
+                inputSchema: zodToJsonSchema(saveToMacSchema),
             },
             {
                 name: "get_download_link",
@@ -272,6 +289,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case "get_download_link": {
                 const parsed = getDownloadLinkSchema.parse(args);
                 const result = await handleGetDownloadLink(parsed);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                    isError: result.status === "error",
+                };
+            }
+            case "save_to_mac": {
+                const parsed = saveToMacSchema.parse(args);
+                const result = await handleSaveToMac(parsed);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                     isError: result.status === "error",
