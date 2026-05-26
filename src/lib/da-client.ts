@@ -95,6 +95,16 @@ export class DAError extends Error {
 
 // ── Activity ──────────────────────────────────────────────────────────────
 
+export interface ActivityDefinition {
+  id: string;
+  description?: string;
+  commandLine: string[];
+  parameters: Record<string, { verb: string; localName?: string; description?: string; zip?: boolean }>;
+  engine: string;
+  appbundles: string[];
+  settings?: Record<string, { data: string }>;
+}
+
 export async function getActivity(
   token: string,
   qualifiedActivityId: string // e.g. "clientId.ActivityName+prod"
@@ -105,6 +115,44 @@ export async function getActivity(
   if (res.status === 404) return null;
   if (!res.ok) throw new DAError(`GET activity failed: ${res.statusText}`, res.status);
   return res.json();
+}
+
+export async function createActivity(
+  token: string,
+  definition: ActivityDefinition
+): Promise<void> {
+  const res = await fetchWithTimeout(`${DA_BASE}/activities`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(definition),
+  }, 20_000);
+  // 409 = activity already exists — not an error
+  if (!res.ok && res.status !== 409) {
+    const body = await res.text();
+    throw new DAError(`Create activity failed: ${body}`, res.status, body);
+  }
+}
+
+export async function createActivityAlias(
+  token: string,
+  qualifiedActivityId: string, // e.g. "nickname.ActivityName" (no +alias suffix)
+  alias: string,
+  version: number
+): Promise<void> {
+  const res = await fetchWithTimeout(
+    `${DA_BASE}/activities/${encodeURIComponent(qualifiedActivityId)}/aliases`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: alias, version }),
+    },
+    20_000
+  );
+  // 409 = alias already exists — not an error
+  if (!res.ok && res.status !== 409) {
+    const body = await res.text();
+    throw new DAError(`Create activity alias failed: ${body}`, res.status, body);
+  }
 }
 
 // ── OSS bucket ────────────────────────────────────────────────────────────

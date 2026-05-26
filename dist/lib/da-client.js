@@ -61,7 +61,6 @@ export class DAError extends Error {
         this.name = "DAError";
     }
 }
-// ── Activity ──────────────────────────────────────────────────────────────
 export async function getActivity(token, qualifiedActivityId // e.g. "clientId.ActivityName+prod"
 ) {
     const res = await fetchWithTimeout(`${DA_BASE}/activities/${encodeURIComponent(qualifiedActivityId)}`, {
@@ -72,6 +71,31 @@ export async function getActivity(token, qualifiedActivityId // e.g. "clientId.A
     if (!res.ok)
         throw new DAError(`GET activity failed: ${res.statusText}`, res.status);
     return res.json();
+}
+export async function createActivity(token, definition) {
+    const res = await fetchWithTimeout(`${DA_BASE}/activities`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(definition),
+    }, 20_000);
+    // 409 = activity already exists — not an error
+    if (!res.ok && res.status !== 409) {
+        const body = await res.text();
+        throw new DAError(`Create activity failed: ${body}`, res.status, body);
+    }
+}
+export async function createActivityAlias(token, qualifiedActivityId, // e.g. "nickname.ActivityName" (no +alias suffix)
+alias, version) {
+    const res = await fetchWithTimeout(`${DA_BASE}/activities/${encodeURIComponent(qualifiedActivityId)}/aliases`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ id: alias, version }),
+    }, 20_000);
+    // 409 = alias already exists — not an error
+    if (!res.ok && res.status !== 409) {
+        const body = await res.text();
+        throw new DAError(`Create activity alias failed: ${body}`, res.status, body);
+    }
 }
 // ── OSS bucket ────────────────────────────────────────────────────────────
 export async function ensureBucket(token, bucketKey, policy = "transient") {

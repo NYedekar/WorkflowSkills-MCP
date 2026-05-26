@@ -4708,20 +4708,15 @@
                 },
                 {
                   "id": "autocad:AutoCADDrawingMetadataExtraction",
-                  "alias": "AutoCADDrawingMetadataExtraction",
-                  "qualifiedName": "com.autodesk.autocad.AutoCADDrawingMetadataExtraction",
+                  "alias": "ExtractAutoCADDrawingMetadata",
+                  "qualifiedName": "com.autodesk.autocad.ExtractAutoCADDrawingMetadata",
                   "version": "1.0.0",
                   "product": "AutoCAD",
                   "groupId": "autocad:data-extraction",
-                  "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                  "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                   "risk": "SAFE",
-                  "ioShape": "sourceFile.dwg + config.json → result.json",
-                  "runtimeRouting": {
-                    "configFile": "config.json",
-                    "operationField": "operationId",
-                    "supportsMultipleOperations": true
-                  },
-                  "rawSourceSnippet": "CAPABILITY: AutoCADDrawingMetadataExtraction\n\nRisk: SAFE\nI/O: sourceFile.dwg + config.json → result.json\nEngine: Autodesk.AutoCAD+22, +23, +24, +25\n\nOperations:\n",
+                  "ioShape": "inputFile.dwg → result.json",
+                  "rawSourceSnippet": "CAPABILITY: AutoCADDrawingMetadataExtraction\n\nRisk: SAFE\nI/O: sourceFile.dwg + config.json → result.json\nEngine: Autodesk.AutoCAD+25_0, +25_1, +26_0\n\nOperations:\n",
                   "contract": {
                     "identity": {
                       "name": "AutoCAD Drawing Metadata Extraction",
@@ -4729,12 +4724,12 @@
                       "scope": "Engine API"
                     },
                     "io": {
-                      "input": "sourceFile.dwg + config.json",
+                      "input": "inputFile.dwg",
                       "output": "result.json"
                     },
                     "execution": {
                       "accessPattern": "AppBundle",
-                      "interface": "Autodesk.AutoCAD+22, +23, +24, +25"
+                      "interface": "Autodesk.AutoCAD+25_0, +25_1, +26_0"
                     },
                     "governance": {
                       "riskLevel": "SAFE",
@@ -4763,22 +4758,31 @@
                       "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
                       "groupId": "autocad:data-extraction",
                       "product": "AutoCAD",
-                      "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                       "risk": "SAFE",
                       "configSchema": "AutoCADDrawingMetadataExtraction.extract-drawing-statistics.config.schema.json",
                       "outputContract": "Structured JSON result",
-                      "ioShape": "sourceFile.dwg + config.json → result.json",
+                      "ioShape": "inputFile.dwg → result.json",
                       "modifiesFile": false,
                       "readOnly": true,
                       "destructive": false,
                       "rawSourceSnippet": "extract-drawing-statistics\n  Return entity counts, layer counts, block counts, XREF count, drawing unit, and limits.",
                       "globalOperationId": "autocad.extract-drawing-statistics",
-                      "callable": false,
+                      "callable": true,
                       "effect": "read",
                       "authScopes": [
                         "code:all"
                       ],
-                      "sourceVerificationStatus": "VERIFIED"
+                      "sourceVerificationStatus": "VERIFIED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
                     },
                     {
                       "operationId": "extract-symbol-table-inventory",
@@ -4787,22 +4791,31 @@
                       "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
                       "groupId": "autocad:data-extraction",
                       "product": "AutoCAD",
-                      "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                       "risk": "SAFE",
                       "configSchema": "AutoCADDrawingMetadataExtraction.extract-symbol-table-inventory.config.schema.json",
                       "outputContract": "Structured JSON result",
-                      "ioShape": "sourceFile.dwg + config.json → result.json",
+                      "ioShape": "inputFile.dwg → result.json",
                       "modifiesFile": false,
                       "readOnly": true,
                       "destructive": false,
                       "rawSourceSnippet": "extract-symbol-table-inventory\n  Export all named records across symbol tables.",
                       "globalOperationId": "autocad.extract-symbol-table-inventory",
-                      "callable": false,
+                      "callable": true,
                       "effect": "read",
                       "authScopes": [
                         "code:all"
                       ],
-                      "sourceVerificationStatus": "VERIFIED"
+                      "sourceVerificationStatus": "VERIFIED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
                     },
                     {
                       "operationId": "extract-layout-data",
@@ -4811,22 +4824,31 @@
                       "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
                       "groupId": "autocad:data-extraction",
                       "product": "AutoCAD",
-                      "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                       "risk": "SAFE",
                       "configSchema": "AutoCADDrawingMetadataExtraction.extract-layout-data.config.schema.json",
                       "outputContract": "Structured JSON result",
-                      "ioShape": "sourceFile.dwg + config.json → result.json",
+                      "ioShape": "inputFile.dwg → result.json",
                       "modifiesFile": false,
                       "readOnly": true,
                       "destructive": false,
                       "rawSourceSnippet": "extract-layout-data\n  List all layouts with page setup, plotter, paper size, orientation, and viewport count.",
                       "globalOperationId": "autocad.extract-layout-data",
-                      "callable": false,
+                      "callable": true,
                       "effect": "read",
                       "authScopes": [
                         "code:all"
                       ],
-                      "sourceVerificationStatus": "VERIFIED"
+                      "sourceVerificationStatus": "VERIFIED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
                     },
                     {
                       "operationId": "extract-project-custom-properties",
@@ -4835,22 +4857,31 @@
                       "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
                       "groupId": "autocad:data-extraction",
                       "product": "AutoCAD",
-                      "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                       "risk": "SAFE",
                       "configSchema": "AutoCADDrawingMetadataExtraction.extract-project-custom-properties.config.schema.json",
                       "outputContract": "Structured JSON result",
-                      "ioShape": "sourceFile.dwg + config.json → result.json",
+                      "ioShape": "inputFile.dwg → result.json",
                       "modifiesFile": false,
                       "readOnly": true,
                       "destructive": false,
                       "rawSourceSnippet": "extract-project-custom-properties\n  Read custom properties stored in DWG summary information.",
                       "globalOperationId": "autocad.extract-project-custom-properties",
-                      "callable": false,
+                      "callable": true,
                       "effect": "read",
                       "authScopes": [
                         "code:all"
                       ],
-                      "sourceVerificationStatus": "VERIFIED"
+                      "sourceVerificationStatus": "VERIFIED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
                     },
                     {
                       "operationId": "extract-drawing-history",
@@ -4859,22 +4890,31 @@
                       "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
                       "groupId": "autocad:data-extraction",
                       "product": "AutoCAD",
-                      "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                       "risk": "SAFE",
                       "configSchema": "AutoCADDrawingMetadataExtraction.extract-drawing-history.config.schema.json",
                       "outputContract": "Structured JSON result",
-                      "ioShape": "sourceFile.dwg + config.json → result.json",
+                      "ioShape": "inputFile.dwg → result.json",
                       "modifiesFile": false,
                       "readOnly": true,
                       "destructive": false,
                       "rawSourceSnippet": "extract-drawing-history\n  Read last saved by, last saved time, and total editing time.",
                       "globalOperationId": "autocad.extract-drawing-history",
-                      "callable": false,
+                      "callable": true,
                       "effect": "read",
                       "authScopes": [
                         "code:all"
                       ],
-                      "sourceVerificationStatus": "VERIFIED"
+                      "sourceVerificationStatus": "VERIFIED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
                     },
                     {
                       "operationId": "extract-layer-table",
@@ -4883,22 +4923,31 @@
                       "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
                       "groupId": "autocad:data-extraction",
                       "product": "AutoCAD",
-                      "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                       "risk": "SAFE",
                       "configSchema": "AutoCADDrawingMetadataExtraction.extract-layer-table.config.schema.json",
                       "outputContract": "Structured JSON result",
-                      "ioShape": "sourceFile.dwg + config.json → result.json",
+                      "ioShape": "inputFile.dwg → result.json",
                       "modifiesFile": false,
                       "readOnly": true,
                       "destructive": false,
                       "rawSourceSnippet": "extract-layer-table\n  Export the full layer table. Returns per layer: name, colorIndex, colorRGB (if TrueColor), linetype, lineWeight, transparency, isOff, isFrozen, isLocked, isPlottable, description.",
                       "globalOperationId": "autocad.extract-layer-table",
-                      "callable": false,
+                      "callable": true,
                       "effect": "read",
                       "authScopes": [
                         "code:all"
                       ],
-                      "sourceVerificationStatus": "VERIFIED"
+                      "sourceVerificationStatus": "VERIFIED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
                     },
                     {
                       "operationId": "extract-xref-list",
@@ -4907,22 +4956,65 @@
                       "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
                       "groupId": "autocad:data-extraction",
                       "product": "AutoCAD",
-                      "engine": "Autodesk.AutoCAD+22, +23, +24, +25",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
                       "risk": "SAFE",
                       "configSchema": "AutoCADDrawingMetadataExtraction.extract-xref-list.config.schema.json",
                       "outputContract": "Structured JSON result",
-                      "ioShape": "sourceFile.dwg + config.json → result.json",
+                      "ioShape": "inputFile.dwg → result.json",
                       "modifiesFile": false,
                       "readOnly": true,
                       "destructive": false,
                       "rawSourceSnippet": "extract-xref-list\n  List all attached XREFs. Returns per XREF: name, path, xrefStatus (Loaded/Unloaded/NotFound/Unresolved), attachmentType (Attach|Overlay), isUnloaded.",
                       "globalOperationId": "autocad.extract-xref-list",
-                      "callable": false,
+                      "callable": true,
                       "effect": "read",
                       "authScopes": [
                         "code:all"
                       ],
-                      "sourceVerificationStatus": "VERIFIED"
+                      "sourceVerificationStatus": "VERIFIED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
+                    },
+                    {
+                      "operationId": "extract-all-metadata",
+                      "displayName": "Extract All Metadata",
+                      "description": "Run all 7 metadata extractions (drawing statistics, symbol table inventory, layout data, custom properties, drawing history, layer table, and Xref list) in a single DWG open/close pass. Returns a combined result.json with each extraction keyed by operationId. Preferred over individual operations when full metadata is needed — 1 work item instead of 7.",
+                      "capabilityId": "autocad:AutoCADDrawingMetadataExtraction",
+                      "groupId": "autocad:data-extraction",
+                      "product": "AutoCAD",
+                      "engine": "Autodesk.AutoCAD+25_0, +25_1, +26_0",
+                      "risk": "SAFE",
+                      "configSchema": "AutoCADDrawingMetadataExtraction.extract-all-metadata.config.schema.json",
+                      "outputContract": "Structured JSON result",
+                      "ioShape": "inputFile.dwg → result.json",
+                      "modifiesFile": false,
+                      "readOnly": true,
+                      "destructive": false,
+                      "rawSourceSnippet": "extract-all-metadata\n  Run all 7 metadata extractions in a single DWG open/close pass and return a combined result.json keyed by operationId.",
+                      "globalOperationId": "autocad.extract-all-metadata",
+                      "callable": true,
+                      "effect": "read",
+                      "authScopes": [
+                        "code:all"
+                      ],
+                      "activityId": "ExtractAutoCADDrawingMetadataAll",
+                      "sourceVerificationStatus": "PROPOSED",
+                      "workItemArguments": {
+                        "inputFile": {
+                          "verb": "get"
+                        },
+                        "resultJson": {
+                          "verb": "put",
+                          "localName": "result.json"
+                        }
+                      }
                     }
                   ]
                 },

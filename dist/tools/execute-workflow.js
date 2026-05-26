@@ -2,9 +2,10 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { fileURLToPath } from "url";
 import { resolveCredential, DEFAULT_SCOPES } from "../auth/credential-resolver.js";
 import { findCapabilityById, findOperationByGlobalId } from "../lib/registry-client.js";
-import { getActivity, getNickname, ensureBucket, uploadJsonToOss, submitWorkItem, pollWorkItem, getSignedDownloadUrl, getSignedS3UploadUrl, uploadToS3, finalizeS3Upload, DAError, } from "../lib/da-client.js";
+import { getActivity, createActivity, createActivityAlias, getNickname, ensureBucket, uploadJsonToOss, submitWorkItem, pollWorkItem, getSignedDownloadUrl, getSignedS3UploadUrl, uploadToS3, finalizeS3Upload, DAError, } from "../lib/da-client.js";
 // getSignedDownloadUrl is used for oss:// → signed HTTPS input URL conversion (DA WorkItem inputs)
 // ── Schema ────────────────────────────────────────────────────────────────
 export const executeWorkflowSchema = z.object({
@@ -107,6 +108,25 @@ const DA_SCOPES = [
     "bucket:update",
 ];
 const APS_BASE = "https://developer.api.autodesk.com";
+// ── Activity auto-provisioning ────────────────────────────────────────────
+// Loads a local Activity definition from data/activities/<name>.json and substitutes
+// {NICKNAME} with the caller's DA nickname. Returns null if no definition exists.
+function activityDefinitionsDir() {
+    if (process.env.APS_ACTIVITIES_PATH)
+        return process.env.APS_ACTIVITIES_PATH;
+    const __dir = path.dirname(fileURLToPath(import.meta.url));
+    return path.resolve(__dir, "../../data/activities");
+}
+function loadActivityDefinition(activityName, nickname) {
+    const defPath = path.join(activityDefinitionsDir(), `${activityName}.json`);
+    try {
+        const raw = fs.readFileSync(defPath, "utf-8").replace(/\{NICKNAME\}/g, nickname);
+        return JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+}
 // ── Main handler ──────────────────────────────────────────────────────────
 export async function handleExecuteWorkflow(input) {
     const t0 = Date.now();
@@ -488,31 +508,57 @@ async function executeEngineApi(cap, op, input, t0) {
         };
     }
     if (!activityExists) {
-        return {
-            status: "activity_not_found",
-            mode: "engine_api",
-            capability: capSummary(cap),
-            operation: opSummary(op),
-            activityChecked: activityId,
-            error: `APS Activity '${activityId}' not found.`,
-            hint: op.workItemArguments || op.workItemTemplate
-                ? `Re-run the GitHub Actions workflow to publish the AppBundle and Activity under your APS account.`
-                : `The AppBundle for '${cap.alias}' has not been registered in your APS account.\n\n` +
-                    `Register it:\n` +
-                    `  1. POST /da/us-east/v3/appbundles\n` +
-                    `     { "id": "${cap.alias}", "engine": "${resolveEngineAlias(cap.engine)}" }\n\n` +
-                    `  2. POST /da/us-east/v3/activities\n` +
-                    `     { "id": "${cap.alias}", "engine": "${resolveEngineAlias(cap.engine)}",\n` +
-                    `       "appbundles": ["${cred.client_id}.${cap.alias}+prod"],\n` +
-                    `       "parameters": {\n` +
-                    `         "${deriveInputArgName(cap.ioShape)}": { "verb": "get" },\n` +
-                    `         "config": { "verb": "get", "localName": "config.json" },\n` +
-                    `         "result": { "verb": "put", "localName": "result.json" }\n` +
-                    `       }\n` +
-                    `     }\n\n` +
-                    `  3. POST /da/us-east/v3/activities/${cap.alias}/aliases\n` +
-                    `     { "id": "prod", "version": 1 }`,
-        };
+        // Derive unqualified name (strip "nickname." prefix and "+alias" suffix)
+        const unqualifiedName = activityId
+            .replace(`${nickname}.`, "")
+            .replace(/\+[^+]+$/, "");
+        const definition = loadActivityDefinition(unqualifiedName, nickname);
+        if (definition) {
+            // Auto-provision: create Activity + prod alias from local definition
+            try {
+                await createActivity(cred.access_token, definition);
+                await createActivityAlias(cred.access_token, `${nickname}.${definition.id}`, engineAlias, 1);
+            }
+            catch (err) {
+                return {
+                    status: "activity_not_found",
+                    mode: "engine_api",
+                    capability: capSummary(cap),
+                    operation: opSummary(op),
+                    activityChecked: activityId,
+                    error: `Activity '${activityId}' not found and auto-provisioning failed: ${String(err)}`,
+                    hint: `Ensure the AppBundle '${nickname}.ExtractAutoCADDrawingMetadata+prod' is registered before creating this Activity.`,
+                };
+            }
+            // Fall through to work item submission with the freshly created Activity
+        }
+        else {
+            return {
+                status: "activity_not_found",
+                mode: "engine_api",
+                capability: capSummary(cap),
+                operation: opSummary(op),
+                activityChecked: activityId,
+                error: `APS Activity '${activityId}' not found.`,
+                hint: op.workItemArguments || op.workItemTemplate
+                    ? `Re-run the GitHub Actions workflow to publish the AppBundle and Activity under your APS account.`
+                    : `The AppBundle for '${cap.alias}' has not been registered in your APS account.\n\n` +
+                        `Register it:\n` +
+                        `  1. POST /da/us-east/v3/appbundles\n` +
+                        `     { "id": "${cap.alias}", "engine": "${resolveEngineAlias(cap.engine)}" }\n\n` +
+                        `  2. POST /da/us-east/v3/activities\n` +
+                        `     { "id": "${cap.alias}", "engine": "${resolveEngineAlias(cap.engine)}",\n` +
+                        `       "appbundles": ["${cred.client_id}.${cap.alias}+prod"],\n` +
+                        `       "parameters": {\n` +
+                        `         "${deriveInputArgName(cap.ioShape)}": { "verb": "get" },\n` +
+                        `         "config": { "verb": "get", "localName": "config.json" },\n` +
+                        `         "result": { "verb": "put", "localName": "result.json" }\n` +
+                        `       }\n` +
+                        `     }\n\n` +
+                        `  3. POST /da/us-east/v3/activities/${cap.alias}/aliases\n` +
+                        `     { "id": "prod", "version": 1 }`,
+            };
+        }
     }
     // ── Build WorkItem args with presigned S3 upload URLs for outputs ─────
     // DA cannot PUT to oss:// URLs. Presigned S3 URLs work without auth headers.
