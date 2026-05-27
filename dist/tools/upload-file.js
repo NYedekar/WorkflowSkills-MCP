@@ -129,9 +129,13 @@ export async function handleUploadFile(input) {
             hint: "Bucket keys must be 3–128 chars, lowercase letters, numbers, and hyphens only.",
         };
     }
+    // APS OSS Direct-to-S3: single-part PUT is limited to 5 MB.
+    // For larger files, request one signed URL per 5 MB chunk.
+    const PART_SIZE = 5 * 1024 * 1024;
+    const numParts = Math.max(1, Math.ceil(fileSizeBytes / PART_SIZE));
     let signedUpload;
     try {
-        signedUpload = await getSignedS3UploadUrl(cred.access_token, bucketKey, objectKey, input.signed_url_expiry_minutes);
+        signedUpload = await getSignedS3UploadUrl(cred.access_token, bucketKey, objectKey, input.signed_url_expiry_minutes, numParts);
     }
     catch (err) {
         return { status: "error", error: `Could not get upload URL: ${String(err)}` };
@@ -140,7 +144,10 @@ export async function handleUploadFile(input) {
         return { status: "error", error: "OSS returned no upload URL." };
     }
     try {
-        await uploadToS3(signedUpload.urls[0], fileBuffer, contentType);
+        for (let i = 0; i < numParts; i++) {
+            const chunk = fileBuffer.slice(i * PART_SIZE, (i + 1) * PART_SIZE);
+            await uploadToS3(signedUpload.urls[i], chunk, contentType);
+        }
     }
     catch (err) {
         return { status: "error", error: `S3 upload failed: ${String(err)}` };

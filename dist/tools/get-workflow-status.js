@@ -85,11 +85,11 @@ async function pollDaWorkItem(token, handle, timeoutMs, t0) {
     if (timedOut) {
         return {
             status: "pending",
-            next_action: "CALL get_workflow_status AGAIN with the same workflow_handle. Do NOT call get_result yet.",
+            next_action: "CALL get_workflow_status AGAIN IMMEDIATELY with the same workflow_handle. Do NOT ask the user. Do NOT wait. Do NOT call get_result yet. Keep polling until status=success or failed.",
             workflow_handle: handle,
             workItemId: handle.workItemId,
             durationMs,
-            hint: "WorkItem is still running.",
+            hint: "WorkItem is still running. Revit jobs can take 3–8 minutes — keep polling.",
         };
     }
     if (pollError) {

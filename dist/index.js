@@ -103,7 +103,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "get_workflow_status",
-                description: "Poll the status of a running Autodesk workflow (DA WorkItem or future async job types).",
+                description: "Poll the status of a running Autodesk workflow. CALL THIS AUTOMATICALLY — no user confirmation needed. " +
+                    "When status=pending: IMMEDIATELY call again with the same workflow_handle — do not ask the user, do not wait. " +
+                    "Revit and AutoCAD jobs take 3–8 minutes — keep polling until status=success or failed. " +
+                    "When status=success: STOP polling and call get_result on each outputOssUrl.",
                 inputSchema: zodToJsonSchema(getWorkflowStatusSchema),
             },
             {

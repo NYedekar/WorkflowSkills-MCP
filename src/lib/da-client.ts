@@ -335,11 +335,12 @@ export async function getSignedS3UploadUrl(
   token: string,
   bucketKey: string,
   objectKey: string,
-  minutesExpiration = 60
+  minutesExpiration = 60,
+  parts = 1
 ): Promise<SignedUploadResponse> {
   const url =
     `${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signeds3upload` +
-    `?minutesExpiration=${minutesExpiration}`;
+    `?minutesExpiration=${minutesExpiration}&parts=${parts}`;
 
   const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },

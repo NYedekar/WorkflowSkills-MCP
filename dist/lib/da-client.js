@@ -217,9 +217,9 @@ export async function getSignedS3DownloadUrl(token, ossUrl // oss://bucketKey/ob
         throw new DAError("S3 download URL response missing url field");
     return url;
 }
-export async function getSignedS3UploadUrl(token, bucketKey, objectKey, minutesExpiration = 60) {
+export async function getSignedS3UploadUrl(token, bucketKey, objectKey, minutesExpiration = 60, parts = 1) {
     const url = `${OSS_BASE}/buckets/${bucketKey}/objects/${encodeURIComponent(objectKey)}/signeds3upload` +
-        `?minutesExpiration=${minutesExpiration}`;
+        `?minutesExpiration=${minutesExpiration}&parts=${parts}`;
     const res = await fetchWithTimeout(url, {
         headers: { Authorization: `Bearer ${token}` },
     }, 15_000);
