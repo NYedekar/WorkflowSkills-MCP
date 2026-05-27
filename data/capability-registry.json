@@ -6877,7 +6877,8 @@
                           },
                           "Result": {
                             "url": "{signed-output-url}",
-                            "verb": "post"
+                            "verb": "post",
+                            "localName": "result.pdf"
                           }
                         }
                       }
