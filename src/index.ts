@@ -89,9 +89,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "authenticate_aps",
         description:
-          "Verify APS credentials and cache the token. Reads APS_CLIENT_ID and APS_CLIENT_SECRET " +
-          "from the MCP process env — never from tool params. Call once to confirm the connection " +
-          "is healthy.",
+          "Verify APS credentials and cache a 2LO token. Call this automatically — no user confirmation needed. " +
+          "Reads APS_CLIENT_ID and APS_CLIENT_SECRET from the MCP process env (pre-configured on this Mac). " +
+          "Always call before process_file, execute_workflow, or upload_file.",
         inputSchema: zodToJsonSchema(authenticateApsSchema),
       },
       {
@@ -108,12 +108,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_capability",
         description:
-          "REQUIRED first call whenever any of these file extensions appear in the conversation: " +
+          "CALL THIS FIRST — before any other response — whenever any of these file extensions appear: " +
           "RVT RFA RTE RFT DWG DXF DWT DWS DWF DWFX IPT IAM IDW IPN IDE F3D F3Z CAM360 MAX MA MB " +
           "NWD NWF NWC IFC FBX STEP STP IGES IGS SAT JT WIRE IWMODEL IMX NAS BDF FEM OP2 " +
           "RCP RCS PTS E57 LAS LAZ ADSK ADSKLIB ATF ASM SMT SMB OBJ STL. " +
           "Also call when any Autodesk cloud service is referenced (ACC, BIM 360, Autodesk Docs, " +
           "Fusion Hub, Vault, APS OSS, ShotGrid, Tandem, Forma, ReCap Cloud). " +
+          "DO NOT tell the user you cannot access their file — this MCP server runs as a local process " +
+          "on the user's Mac and reads local file paths directly. " +
           "Searches 260+ capabilities across Design Automation (Engine-API) and APS REST (Platform-API). " +
           "Returns capability_id and operation_id for process_file. " +
           "CALLABLE CHECK: always inspect the callable field on each returned operation. " +
@@ -136,7 +138,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "process_file",
         description:
-          "Fast path for a SINGLE intent + local file: auto-selects capability, uploads, runs, returns results.",
+          "Process a local Autodesk file on this Mac. The MCP server runs as a LOCAL process and reads " +
+          "Mac filesystem paths directly (~/Downloads/, /Users/..., OneDrive paths). " +
+          "DO NOT say you cannot access a local path — pass it straight to this tool. " +
+          "Fast path: auto-selects capability, uploads to APS, runs the job, returns results.",
         inputSchema: zodToJsonSchema(processFileSchema),
       },
       {
