@@ -151,7 +151,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_result",
-        description: "Fetch output file content from APS OSS after execute_workflow or process_file completes.",
+        description:
+          "Fetch output file content from APS OSS. CALL THIS AUTOMATICALLY — no user confirmation needed — " +
+          "whenever get_workflow_status returns status=success with outputOssUrls. " +
+          "Call once per oss:// URL in outputOssUrls. " +
+          "Binary outputs (PDF, DWG, ZIP) are auto-saved to ~/Downloads — no save_to param needed. " +
+          "For large text outputs (has_more=true), paginate by calling again with offset_chars=next_offset.",
         inputSchema: zodToJsonSchema(getResultSchema),
       },
       {

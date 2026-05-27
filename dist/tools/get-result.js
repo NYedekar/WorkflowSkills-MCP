@@ -284,7 +284,8 @@ export async function handleGetResult(input) {
             try {
                 // Re-fetch the full file for saving (the range fetch above was only a preview slice)
                 const fullController = new AbortController();
-                const fullTimer = setTimeout(() => fullController.abort(), 120_000);
+                // 45s keeps total get_result call well under MCP transport timeout (~60s)
+                const fullTimer = setTimeout(() => fullController.abort(), 45_000);
                 let fullRes;
                 try {
                     fullRes = await fetch(signedUrl, { signal: fullController.signal });

@@ -157,7 +157,7 @@ async function pollDaWorkItem(
     return {
       status: "success",
       next_action: outputCount > 0
-        ? `STOP POLLING. Call get_result on each of the ${outputCount} outputOssUrls to retrieve the output files.`
+        ? `STOP POLLING. CALL get_result NOW on each of the ${outputCount} outputOssUrls. Do not wait or ask the user. Call get_result for each oss:// URL in outputOssUrls.`
         : "STOP POLLING. Job completed with no output files.",
       workItemId: handle.workItemId,
       outputOssUrls: handle.outputOssUrls,
