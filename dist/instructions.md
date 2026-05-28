@@ -92,10 +92,36 @@ STEP 0 — ANALYSE DEPENDENCIES, THEN ROUTE (do this before calling any tool):
 
 ── STANDARD FLOW ────────────────────────────────────────────────────────
 
-Step 1 — get_capability(query='<ext> <intent>') — call immediately, no confirmation needed.
+Step 1 — get_capability (parallel lookups, one per intent) — call immediately, no confirmation needed.
 Step 2 — authenticate_aps() — call immediately, no confirmation needed. Credentials are pre-configured.
          • error → stop. Show error. Ask user to check APS credentials.
-Step 3 — Execute using the pattern selected in STEP 0 (Cases A–E above).
+Step 3 — PRESENT EXECUTION PLAN (mandatory, before any upload or job submission):
+         After capability discovery, output a brief plan showing every task, its capability +
+         operation, and the execution pattern. Then proceed immediately — do not wait for confirmation.
+
+         Format (adapt to the number of tasks):
+         ──────────────────────────────────────────
+         Here's my execution plan:
+
+         Task 1 · <short label>
+           Capability: <capability_id> / <operation_id>
+           Pattern: <e.g. "upload once, run in parallel with Task 2 (Case B)">
+
+         Task 2 · <short label>
+           Capability: <capability_id> / <operation_id>
+           Pattern: <e.g. "shares upload with Task 1 (Case B)">
+
+         Task 3 · <short label>
+           Capability: <capability_id> / <operation_id>
+           Pattern: <e.g. "REST call, runs concurrently (Case E)">
+
+         Proceeding now…
+         ──────────────────────────────────────────
+
+         Keep it concise — one line per field. Always include the capability_id and operation_id
+         so the user can verify the right tool is being used before any file is uploaded.
+
+Step 4 — Execute using the pattern selected in STEP 0 (Cases A–E above).
 
 ── CALLABLE: FALSE — MANDATORY FALLBACK PROTOCOL ───────────────────────
 
