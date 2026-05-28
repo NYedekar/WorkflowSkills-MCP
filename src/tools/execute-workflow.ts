@@ -374,7 +374,8 @@ async function executeRest(
           error: "3LO_REQUIRED",
           hint:
             "This operation requires a user-identity token. " +
-            "Call authenticate_aps_3lo first — it opens a browser login, stores the token, and retries automatically. " +
+            "Call authenticate_aps_3lo first — it opens a browser login and stores the token. " +
+            "Once authenticate_aps_3lo returns success, immediately re-call execute_workflow with the same capability_id, operation_id, and args. " +
             `Required scopes: ${(op.authScopes ?? []).join(", ") || "(see APS docs)"}.`,
         };
       }
@@ -394,6 +395,19 @@ async function executeRest(
           };
         }
       }
+    } else if (strategy === "custom") {
+      // Non-standard flow (Partner OAuth 2.0, HMAC, JWT-bearer, etc.) — cannot auto-mint.
+      // Return actionable error with the flow name; caller must supply bearer_token manually.
+      const flowNames = (op.authFlows ?? cap.authFlows ?? []).join(", ");
+      return {
+        status: "error",
+        capability: capSummary(cap),
+        operation: opSummary(op),
+        error: `Operation '${op.operationId}' requires a non-standard auth flow: ${flowNames}.`,
+        hint:
+          `This flow cannot be initiated automatically. Obtain a token via the '${flowNames}' flow ` +
+          `and pass it as the bearer_token parameter.`,
+      };
     } else {
       // "2LO" — skip 3LO attempt entirely
       try {
@@ -937,10 +951,12 @@ function routeArgs(
 
 // Derives the effective auth strategy for a REST operation.
 // Priority: explicit authStrategy field → inferred from authFlows.
+// Returns "custom" for non-empty flows with no recognised APS OAuth pattern
+// (e.g. Partner OAuth 2.0, HMAC, JWT-bearer) — caller returns an actionable error.
 function resolveAuthStrategy(
   op: OperationRecord,
   cap: CapabilityRecord
-): "2LO" | "3LO" | "either" {
+): "2LO" | "3LO" | "either" | "custom" {
   const explicit = op.authStrategy ?? cap.authStrategy;
   if (explicit) return explicit;
 
@@ -950,7 +966,8 @@ function resolveAuthStrategy(
 
   if (has2lo && has3lo) return "either";
   if (has3lo) return "3LO";
-  return "2LO"; // 2LO-only, empty flows, SDK, or unknown
+  if (has2lo || flows.length === 0) return "2LO";
+  return "custom"; // unrecognised flow (Partner OAuth, HMAC, JWT-bearer, etc.)
 }
 
 function capSummary(c: CapabilityRecord): CapabilitySummary {
