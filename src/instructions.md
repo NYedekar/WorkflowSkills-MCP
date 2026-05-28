@@ -49,10 +49,11 @@ Example — "Extract params AND export PDFs from model.rvt; also convert drawing
    → process_file  (fast path: upload + run + return results in one call.)
 
 2. Same file, 2+ intents:
-   → create_workflow(file_path=..., intents=[...])  — uploads the file ONCE, runs all jobs on it.
-   → Then execute_workflow(input_file_url=oss_url, ...) for each step in the DAG.
-   NEVER call process_file multiple times for the same file — it re-uploads each time.
-   NEVER use process_file when create_workflow already returned an oss_url for that file.
+   → create_workflow(file_path=..., intents=[...])  — uploads the file ONCE, returns oss_url + DAG.
+   → Read the next_action field in the response — it tells you exactly what to call for each step.
+   → For each DA step: execute_workflow(capability_id=..., operation_id=..., input_file_url=oss_url)
+   NEVER call process_file after create_workflow — the file is already in OSS, re-uploading wastes time.
+   NEVER pass the oss_url to process_file — process_file only accepts local Mac paths.
 
 3. File already in APS OSS (you have an oss:// URL from a prior step)?
    → execute_workflow directly — no upload needed. DO NOT call process_file with an oss:// URL.

@@ -59,7 +59,7 @@ export const createWorkflowSchema = z.object({
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 
 export type CreateWorkflowResult =
-  | { status: "success"; rendered: string; dag: WorkflowDAG; oss_url?: string }
+  | { status: "success"; rendered: string; dag: WorkflowDAG; oss_url?: string; next_action?: string }
   | { status: "bridge_required"; REQUIRED_ACTION: string; mac_path_hint?: string }
   | { status: "error"; error: string; hint?: string };
 
@@ -115,5 +115,13 @@ export async function handleCreateWorkflow(
     };
   }
 
-  return { status: "success", rendered, dag, oss_url };
+  const next_action = oss_url
+    ? `File uploaded to APS OSS: ${oss_url}. ` +
+      `For each DA step in the DAG, call execute_workflow(capability_id=..., operation_id=..., input_file_url="${oss_url}") — ` +
+      `use this oss_url as input_file_url for ALL steps on this file. ` +
+      `NEVER call process_file for this file again — it is already uploaded and re-uploading wastes time and quota. ` +
+      `REST steps (no file input) use execute_workflow without input_file_url as normal.`
+    : undefined;
+
+  return { status: "success", rendered, dag, oss_url, next_action };
 }

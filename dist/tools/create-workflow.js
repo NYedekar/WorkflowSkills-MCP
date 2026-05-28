@@ -89,5 +89,12 @@ export async function handleCreateWorkflow(input) {
             hint: "Check that loop nodes have at least one 'loop' edge, 'after_loop' edges only come from loop nodes, and there are no cycles.",
         };
     }
-    return { status: "success", rendered, dag, oss_url };
+    const next_action = oss_url
+        ? `File uploaded to APS OSS: ${oss_url}. ` +
+            `For each DA step in the DAG, call execute_workflow(capability_id=..., operation_id=..., input_file_url="${oss_url}") — ` +
+            `use this oss_url as input_file_url for ALL steps on this file. ` +
+            `NEVER call process_file for this file again — it is already uploaded and re-uploading wastes time and quota. ` +
+            `REST steps (no file input) use execute_workflow without input_file_url as normal.`
+        : undefined;
+    return { status: "success", rendered, dag, oss_url, next_action };
 }
