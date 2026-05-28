@@ -5,6 +5,10 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { getTwoLeggedToken } from "./auth/aps-token-client.js";
+import { loadSecret } from "./auth/keychain.js";
+import { setCachedToken } from "./auth/token-cache.js";
+import { DEFAULT_SCOPES } from "./auth/credential-resolver.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_INSTRUCTIONS = readFileSync(join(__dirname, "instructions.md"), "utf-8");
 import { createWorkflowSchema, handleCreateWorkflow, } from "./tools/create-workflow.js";
@@ -70,8 +74,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             {
                 name: "execute_workflow",
                 description: "Run a SINGLE APS capability operation: Engine-API (DA WorkItem submit → returns pending immediately → poll with get_workflow_status) " +
-                    "or Platform-API (REST call → returns response inline). For REST operations requiring a user token " +
-                    "(e.g. ACC Admin), call authenticate_aps_3lo first — the token is then used automatically.",
+                    "or Platform-API (REST call → returns response inline). " +
+                    "REST tip: pass all parameters in the single 'args' field — the tool auto-routes each key to path, query, or body. " +
+                    "For REST operations requiring user identity (3LO_REQUIRED error), call authenticate_aps_3lo first.",
                 inputSchema: zodToJsonSchema(executeWorkflowSchema),
             },
             {
@@ -84,7 +89,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 description: "Process a local Autodesk file on this Mac. The MCP server runs as a LOCAL process and reads " +
                     "Mac filesystem paths directly (~/Downloads/, /Users/..., OneDrive paths). " +
                     "DO NOT say you cannot access a local path — pass it straight to this tool. " +
-                    "Fast path: auto-selects capability, uploads to APS, runs the job, returns results.",
+                    "Fast path: auto-selects capability, uploads to APS, runs the job, returns results. " +
+                    "On pending response: immediately chains to get_workflow_status → get_result → get_download_link — " +
+                    "no user confirmation needed for any step.",
                 inputSchema: zodToJsonSchema(processFileSchema),
             },
             {
@@ -201,10 +208,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
     }
 });
+// ─── Startup credential pre-flight ────────────────────────────────────────
+async function preflight() {
+    const clientId = process.env.APS_CLIENT_ID?.trim();
+    if (!clientId) {
+        process.stderr.write("[mcp-workflow-builder] WARNING: APS_CLIENT_ID not set — authenticate_aps will fail. " +
+            "Configure credentials in Claude config and restart.\n");
+        return;
+    }
+    const clientSecret = loadSecret(clientId) ?? process.env.APS_CLIENT_SECRET?.trim() ?? null;
+    if (!clientSecret) {
+        process.stderr.write("[mcp-workflow-builder] WARNING: APS client secret not found in keychain or env — " +
+            "authenticate_aps will fail. Run: cd <mcp-workflow-builder dir> && npm run setup\n");
+        return;
+    }
+    try {
+        const token = await getTwoLeggedToken(clientId, clientSecret, DEFAULT_SCOPES);
+        const cacheKey = `2lo:${clientId}:${DEFAULT_SCOPES.slice().sort().join(",")}`;
+        setCachedToken(cacheKey, token.access_token, token.expires_in);
+        process.stderr.write(`[mcp-workflow-builder] APS credentials OK — token cached (expires in ${token.expires_in}s).\n`);
+    }
+    catch (err) {
+        process.stderr.write(`[mcp-workflow-builder] WARNING: APS auth preflight failed: ${err}. ` +
+            "Check credentials at aps.autodesk.com/myapps.\n");
+    }
+}
 // ─── Start ────────────────────────────────────────────────────────────────
 async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
+    // Fire-and-forget: warms token cache; errors surface to stderr only, never block startup.
+    preflight().catch(() => { });
 }
 main().catch((err) => {
     process.stderr.write(`Fatal: ${err}\n`);

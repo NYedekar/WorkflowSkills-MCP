@@ -26,6 +26,8 @@ export interface OperationRecord {
   baseUrl?: string;
   authScopes?: string[];
   authFlows?: string[];
+  /** Explicit auth strategy override. When absent, derived from authFlows at execution time. */
+  authStrategy?: "2LO" | "3LO" | "either";
   requestSchema?: unknown;
   responseSchema?: unknown;
   asyncJob?: boolean;
@@ -69,6 +71,8 @@ export interface CapabilityRecord {
   // REST-specific
   baseUrl?: string;
   authFlows?: string[];
+  /** Explicit auth strategy override at capability level. */
+  authStrategy?: "2LO" | "3LO" | "either";
   contract?: unknown;
   operations: OperationRecord[];
 }
@@ -156,6 +160,7 @@ function extractCapabilities(
         baseUrl: (o.baseUrl ?? c.baseUrl) as string | undefined,
         authScopes: o.authScopes as string[] | undefined,
         authFlows: o.authFlows as string[] | undefined,
+        authStrategy: o.authStrategy as OperationRecord["authStrategy"] | undefined,
         requestSchema: o.requestSchema,
         responseSchema: o.responseSchema,
         asyncJob: o.asyncJob as boolean | undefined,
@@ -188,6 +193,7 @@ function extractCapabilities(
       defaultWorkItemTemplate: c.defaultWorkItemTemplate as string | undefined,
       baseUrl: c.baseUrl as string | undefined,
       authFlows: c.authFlows as string[] | undefined,
+      authStrategy: c.authStrategy as CapabilityRecord["authStrategy"] | undefined,
       bundleRef: c.bundleRef as string | undefined,
       activityRef: c.activityRef as string | undefined,
       contract: c.contract,

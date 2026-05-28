@@ -29,6 +29,9 @@ Use this decision tree every time before picking a tool:
 
 4. No file, just an APS REST operation or info question?
    → execute_workflow for REST calls. Answer from knowledge for pure info.
+   REST tip: pass all parameters (path, query, body) in the single 'args' field — auto-routed.
+   Example: execute_workflow(capability_id='BucketManagement', operation_id='create_bucket',
+            args={ bucketKey: 'my-bucket', policyKey: 'transient' })
 
 ── STANDARD FLOW ────────────────────────────────────────────────────────
 
@@ -64,16 +67,16 @@ STANDARD MD EXTRACTION FLOW — execute these steps in order:
   Step 1 · Upload file (if not already in OSS) → get oss_url
   Step 2 · execute_workflow(capability_id='aps:md.jobs', operation_id='start_translation_job', input_file_url=oss_url)
            → returns urn. If asyncJob=true, poll fetch_manifest until status='success'.
-  Step 3 · execute_workflow(capability_id='aps:md.manifest', operation_id='fetch_manifest', path_params={urn})
+  Step 3 · execute_workflow(capability_id='aps:md.manifest', operation_id='fetch_manifest', args={urn})
            → confirms translation complete. DO NOT use GUIDs from this manifest for metadata calls.
-  Step 4 · execute_workflow(capability_id='aps:md.metadata', operation_id='list_model_views', path_params={urn})
+  Step 4 · execute_workflow(capability_id='aps:md.metadata', operation_id='list_model_views', args={urn})
            → returns correct modelGuids. ALWAYS use these GUIDs — manifest geometry GUIDs are different and will 404.
-  Step 5a · execute_workflow(capability_id='aps:md.metadata', operation_id='fetch_object_tree', path_params={urn, modelGuid})
+  Step 5a · execute_workflow(capability_id='aps:md.metadata', operation_id='fetch_object_tree', args={urn, modelGuid})
             → entity/layer/component hierarchy.
   Step 5b · execute_workflow(capability_id='aps:md.metadata', operation_id='query_specific_properties',
-            path_params={urn, modelGuid}, body={query:{$prefix:['CategoryName']}})
+            args={urn, modelGuid, query:{$prefix:['CategoryName']}})
             → filtered properties by category. PREFER this over fetch_all_properties to avoid 1MB limit.
-  Step 5c · execute_workflow(capability_id='aps:md.thumbnail', operation_id='fetch_thumbnail', path_params={urn})
+  Step 5c · execute_workflow(capability_id='aps:md.thumbnail', operation_id='fetch_thumbnail', args={urn})
             → PNG preview. Use get_download_link on the result.
 
 WHAT MD COVERS vs GAPS PER PRODUCT:
@@ -115,6 +118,9 @@ WHAT MD COVERS vs GAPS PER PRODUCT:
                     After ~2 minutes, next_action will say CHECK IN WITH USER — obey it exactly.
                     This prevents Claude Desktop's session timeout from killing long-running jobs.
 • failed          → WorkItem failed. Check reportUrl for the DA execution log.
+• 3LO_REQUIRED    → Call authenticate_aps_3lo() immediately — no confirmation needed. It opens a browser login,
+                    stores the token, then re-call the original execute_workflow with the same args. Never ask the user to
+                    "provide a bearer_token" manually — authenticate_aps_3lo handles it automatically.
 • bridge_required → show REQUIRED_ACTION verbatim. Ask for the file's actual Mac path (~/Downloads/, OneDrive, or local folder). Retry with that path.
 
 ── CHAIN RECOVERY (if polling chain breaks mid-job) ─────────────────────

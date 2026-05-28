@@ -210,7 +210,12 @@ export async function handleProcessFile(input: ProcessFileInput): Promise<Proces
   if (execResult.status === "pending") {
     return {
       status: "pending",
-      next_action: "CALL get_workflow_status(workflow_handle) NOW. Do not wait or ask the user. Repeat until next_action says STOP POLLING.",
+      next_action:
+        "CALL get_workflow_status(workflow_handle) NOW. Do not wait or ask the user. Repeat until next_action says STOP POLLING. " +
+        "⚠️ Claude Code CLI / FleetView only: if get_workflow_status schema is not yet loaded (deferred tool), " +
+        "first call ToolSearch with query " +
+        "'select:mcp__workflow-builder__get_workflow_status,mcp__workflow-builder__get_result,mcp__workflow-builder__get_download_link' " +
+        "— then immediately call get_workflow_status. Claude Desktop: skip ToolSearch, call directly.",
       capability_used: capabilityId,
       operation_used: operationId,
       input_oss_url: ossUrl,

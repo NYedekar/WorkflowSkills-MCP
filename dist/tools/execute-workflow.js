@@ -19,30 +19,38 @@ export const executeWorkflowSchema = z.object({
         .describe("The specific operation to run from the capability's operations list. " +
         "Examples: 'extract-room-data', 'create_bucket', 'start_translation_job', 'list_assets'."),
     // ── REST-specific ───────────────────────────────────────────────────────
+    args: z
+        .record(z.unknown())
+        .optional()
+        .describe("All REST parameters in a single flat object — path params, query params, and body fields. " +
+        "The tool auto-routes each key: names that match {placeholders} in the endpoint go to path, " +
+        "remaining keys go to query (GET/DELETE) or body (POST/PUT/PATCH). " +
+        "Example: { \"bucketKey\": \"my-bucket\", \"policyKey\": \"transient\" } " +
+        "for create_bucket — bucketKey fills {bucketKey} in the path, policyKey goes in the body. " +
+        "Tip: pass nested objects for body fields — the tool serialises them as JSON automatically. " +
+        "Ignored for Engine-API capabilities."),
     path_params: z
         .record(z.string())
         .optional()
         .default({})
-        .describe("Path parameter substitutions for REST endpoints. " +
-        "Example: { \"bucketKey\": \"my-bucket\", \"objectKey\": \"model.rvt\" } " +
-        "substitutes {bucketKey} and {objectKey} in the endpoint template."),
+        .describe("[Deprecated — prefer args] Path parameter substitutions for REST endpoints. " +
+        "Still accepted; merged with args (args takes precedence on key conflicts)."),
     query_params: z
         .record(z.string())
         .optional()
         .default({})
-        .describe("Query string parameters appended to the REST URL. " +
-        "Example: { \"limit\": \"50\", \"filter[status]\": \"active\" }."),
+        .describe("[Deprecated — prefer args] Query string parameters appended to the REST URL. " +
+        "Still accepted; merged with args (args takes precedence on key conflicts)."),
     body: z
         .record(z.unknown())
         .optional()
-        .describe("Request body for POST / PUT / PATCH REST operations. " +
-        "Example: { \"bucketKey\": \"my-bucket\", \"policyKey\": \"transient\" }."),
+        .describe("[Deprecated — prefer args] Request body for POST / PUT / PATCH REST operations. " +
+        "Still accepted; merged with args (args takes precedence on key conflicts)."),
     bearer_token: z
         .string()
         .optional()
-        .describe("Explicit OAuth bearer token. Required for 3LO-only operations (Forma, Fusion Operations, " +
-        "Informed Design, Data-APIs) where the tool cannot auto-mint a token. " +
-        "For 2LO-capable operations the token is resolved automatically from stored credentials."),
+        .describe("Explicit OAuth bearer token. Only needed if auto-auth fails or you have a pre-minted token. " +
+        "For 3LO operations, call authenticate_aps_3lo instead — it stores the token automatically."),
     // ── Engine-API (Design Automation) specific ─────────────────────────────
     input_file_url: z
         .string()
@@ -218,18 +226,52 @@ async function executeRest(cap, op, input, t0) {
             hint: "Use the Autodesk Viewer SDK (autodesk.com/viewer) in your browser or front-end application.",
         };
     }
-    // Resolve bearer token — priority: explicit bearer_token > 3LO user token > 2LO app token
+    // Resolve bearer token — priority: explicit bearer_token > strategy-routed token
     let token;
     if (input.bearer_token) {
         token = input.bearer_token;
     }
     else {
         const scopes = resolveScopes(op.authScopes ?? [], DEFAULT_SCOPES);
-        const cred3lo = await resolve3LOCredential(scopes);
-        if (cred3lo) {
-            token = cred3lo.access_token;
+        const strategy = resolveAuthStrategy(op, cap);
+        if (strategy === "3LO") {
+            const cred3lo = await resolve3LOCredential(scopes);
+            if (cred3lo) {
+                token = cred3lo.access_token;
+            }
+            else {
+                return {
+                    status: "error",
+                    capability: capSummary(cap),
+                    operation: opSummary(op),
+                    error: "3LO_REQUIRED",
+                    hint: "This operation requires a user-identity token. " +
+                        "Call authenticate_aps_3lo first — it opens a browser login, stores the token, and retries automatically. " +
+                        `Required scopes: ${(op.authScopes ?? []).join(", ") || "(see APS docs)"}.`,
+                };
+            }
         }
-        else if (flows.length === 0 || flows.includes("2LO-client-credentials")) {
+        else if (strategy === "either") {
+            const cred3lo = await resolve3LOCredential(scopes);
+            if (cred3lo) {
+                token = cred3lo.access_token;
+            }
+            else {
+                try {
+                    const cred = await resolveCredential(scopes);
+                    token = cred.access_token;
+                }
+                catch (err) {
+                    return {
+                        status: "error",
+                        error: `APS auth failed: ${String(err)}`,
+                        hint: "Run authenticate_aps first, or call authenticate_aps_3lo for user-identity operations.",
+                    };
+                }
+            }
+        }
+        else {
+            // "2LO" — skip 3LO attempt entirely
             try {
                 const cred = await resolveCredential(scopes);
                 token = cred.access_token;
@@ -238,30 +280,23 @@ async function executeRest(cap, op, input, t0) {
                 return {
                     status: "error",
                     error: `APS auth failed: ${String(err)}`,
-                    hint: "Run authenticate_aps first, or provide a bearer_token for this operation.",
+                    hint: "Run authenticate_aps first to configure credentials.",
                 };
             }
         }
-        else {
-            return {
-                status: "error",
-                capability: capSummary(cap),
-                operation: opSummary(op),
-                error: `Operation '${op.operationId}' requires user-delegated auth (${flows.join(", ")}) and cannot be auto-executed.`,
-                hint: `Provide a 'bearer_token' obtained via the ${flows.join(" / ")} flow. ` +
-                    `Required scopes: ${(op.authScopes ?? []).join(", ") || "(none listed)"}.`,
-            };
-        }
     }
+    const method = (op.httpMethod ?? "GET").toUpperCase();
+    // Route args → path_params / query_params / body (S2-B: flat args consolidation)
+    const { resolvedPathParams, resolvedQueryParams, resolvedBody } = routeArgs(input.args ?? {}, input.path_params ?? {}, input.query_params ?? {}, input.body, op.endpoint ?? "", method);
     // Build URL
-    const { url, unusedParams } = buildUrl(op.endpoint ?? "", input.path_params ?? {}, input.query_params ?? {});
+    const { url, unusedParams } = buildUrl(op.endpoint ?? "", resolvedPathParams, resolvedQueryParams);
     if (unusedParams.length > 0) {
         return {
             status: "error",
             capability: capSummary(cap),
             operation: opSummary(op),
             error: `Unrecognised path params: ${unusedParams.join(", ")}.`,
-            hint: `Endpoint template is '${op.endpoint}'. Supply matching keys in path_params.`,
+            hint: `Endpoint template is '${op.endpoint}'. Use the args field — path placeholders are auto-detected.`,
         };
     }
     // Check for unfilled required path params
@@ -272,11 +307,10 @@ async function executeRest(cap, op, input, t0) {
             capability: capSummary(cap),
             operation: opSummary(op),
             error: `Missing required path params: ${unresolved.map((p) => `{${p}}`).join(", ")}.`,
-            hint: `Provide these keys in the path_params object. Endpoint: '${op.endpoint}'.`,
+            hint: `Pass these as keys in the args object. Endpoint: '${op.endpoint}'.`,
         };
     }
     const fullUrl = `${APS_BASE}${url}`;
-    const method = (op.httpMethod ?? "GET").toUpperCase();
     // Build headers
     const headers = {
         Authorization: `Bearer ${token}`,
@@ -284,7 +318,7 @@ async function executeRest(cap, op, input, t0) {
     };
     // Auto-inject base64url URN into body.input.urn for REST ops (e.g. Model Derivative).
     // input_file_url is an Engine-API param; REST ops like MD need body.input.urn instead.
-    let effectiveBody = input.body ? { ...input.body } : {};
+    let effectiveBody = resolvedBody ? { ...resolvedBody } : {};
     let manualUrnOverrideWarning;
     if (input.input_file_url?.startsWith("oss://")) {
         const ossPath = input.input_file_url.slice("oss://".length);
@@ -704,6 +738,48 @@ async function executeEngineApi(cap, op, input, t0) {
     };
 }
 // ── Helpers ───────────────────────────────────────────────────────────────
+// Routes flat args → {path, query, body} based on endpoint template + HTTP method.
+// path_params / query_params / body (deprecated) are merged in as low-priority defaults;
+// keys from args always win on conflict.
+function routeArgs(args, legacyPath, legacyQuery, legacyBody, endpoint, method) {
+    // Collect all {placeholder} names from the endpoint template
+    const pathKeys = new Set([...endpoint.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]));
+    const resolvedPathParams = { ...legacyPath };
+    const queryOverrides = {};
+    const bodyOverrides = {};
+    const isBodyMethod = ["POST", "PUT", "PATCH"].includes(method);
+    for (const [key, value] of Object.entries(args)) {
+        if (pathKeys.has(key)) {
+            resolvedPathParams[key] = String(value);
+        }
+        else if (isBodyMethod) {
+            bodyOverrides[key] = value;
+        }
+        else {
+            queryOverrides[key] = String(value);
+        }
+    }
+    const resolvedQueryParams = { ...legacyQuery, ...queryOverrides };
+    const resolvedBody = Object.keys(bodyOverrides).length > 0 || legacyBody
+        ? { ...(legacyBody ?? {}), ...bodyOverrides }
+        : undefined;
+    return { resolvedPathParams, resolvedQueryParams, resolvedBody };
+}
+// Derives the effective auth strategy for a REST operation.
+// Priority: explicit authStrategy field → inferred from authFlows.
+function resolveAuthStrategy(op, cap) {
+    const explicit = op.authStrategy ?? cap.authStrategy;
+    if (explicit)
+        return explicit;
+    const flows = op.authFlows ?? cap.authFlows ?? [];
+    const has2lo = flows.includes("2LO-client-credentials");
+    const has3lo = flows.some((f) => f.startsWith("3LO") || f.includes("auth-code") || f.includes("PKCE"));
+    if (has2lo && has3lo)
+        return "either";
+    if (has3lo)
+        return "3LO";
+    return "2LO"; // 2LO-only, empty flows, SDK, or unknown
+}
 function capSummary(c) {
     return { id: c.id, alias: c.alias, product: c.product, engine: c.engine, domain: c.domain, risk: c.risk };
 }

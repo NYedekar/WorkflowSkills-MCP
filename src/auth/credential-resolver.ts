@@ -6,6 +6,7 @@ export const DEFAULT_SCOPES = [
   "data:read",
   "data:write",
   "data:create",
+  "viewables:read",
   "bucket:create",
   "bucket:read",
   "bucket:update",
