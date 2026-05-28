@@ -106,6 +106,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 description: "Poll the status of a running Autodesk workflow. CALL THIS AUTOMATICALLY — no user confirmation needed. " +
                     "When status=pending: IMMEDIATELY call again with the same workflow_handle — do not ask the user, do not wait. " +
                     "DO NOT output any text between polls — no explanations, no 'retrying', no timeout notes. Just call again silently. " +
+                    "Each call polls for 15s then returns — this is fixed and correct, do NOT try to change it. " +
                     "Revit and AutoCAD jobs take 3–8 minutes — keep polling until status=success or failed. " +
                     "When status=success: STOP polling and call get_result on each outputOssUrl.",
                 inputSchema: zodToJsonSchema(getWorkflowStatusSchema),

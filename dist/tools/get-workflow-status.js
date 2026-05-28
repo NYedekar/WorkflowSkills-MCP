@@ -19,16 +19,10 @@ const workflowHandleSchema = z.object({
 export const getWorkflowStatusSchema = z.object({
     workflow_handle: workflowHandleSchema.describe("The workflow_handle object returned by execute_workflow or a previous get_workflow_status call " +
         "when status was 'pending'. Pass it back exactly as received — do not modify it."),
-    timeout_ms: z
-        .number()
-        .int()
-        .min(5_000)
-        .max(55_000)
-        .optional()
-        .default(15_000)
-        .describe("Max ms to poll in this call. Default 15 000 (keeps each call well under MCP transport timeout). " +
-        "If the job is still running at timeout, status='pending' is returned — call again with the same workflow_handle."),
+    // timeout_ms is intentionally not exposed to the LLM — 15s is always correct.
+    // Exposing it caused the LLM to pass 30–55s on "long-looking" jobs, making polls feel like stalls.
 });
+const POLL_TIMEOUT_MS = 15_000; // fixed — never expose this to the LLM
 // ── Handler ───────────────────────────────────────────────────────────────
 const DA_SCOPES = [
     "code:all",
@@ -58,7 +52,7 @@ export async function handleGetWorkflowStatus(input) {
     }
     // ── Dispatch by handle type ───────────────────────────────────────────────
     if (handle.type === "da_workitem") {
-        return pollDaWorkItem(token, handle, input.timeout_ms, t0);
+        return pollDaWorkItem(token, handle, POLL_TIMEOUT_MS, t0);
     }
     return {
         status: "error",
