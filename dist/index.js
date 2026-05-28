@@ -66,9 +66,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     "DO NOT tell the user you cannot access their file — this MCP server runs as a local process " +
                     "on the user's Mac and reads local file paths directly. " +
                     "Searches 260+ capabilities across Design Automation (Engine-API) and APS REST (Platform-API). " +
-                    "Returns capability_id and operation_id for process_file. " +
+                    "Returns capability_id and operation_id for execute_workflow / process_file. " +
                     "CALLABLE CHECK: always inspect the callable field on each returned operation. " +
-                    "callable=true → proceed. callable=false → DO NOT use that operation.",
+                    "callable=true → proceed. callable=false → DO NOT use that operation. " +
+                    "AFTER all get_capability calls complete: output a brief execution plan to the user " +
+                    "(task name, capability_id, operation_id, execution pattern) BEFORE calling upload_file, " +
+                    "process_file, or execute_workflow. Then proceed immediately without waiting.",
                 inputSchema: zodToJsonSchema(getCapabilitySchema),
             },
             {
