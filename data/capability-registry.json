@@ -2,8 +2,8 @@
   "registry": "Capability Registry",
   "schemaVersion": "1.9.6-rest",
   "generatedAt": "2026-05-19T18:22:33.411Z",
-  "patchedAt": "2026-05-28T18:51:40Z",
-  "patchNotes": "v1.9.7 \u2014 Added 4 PUBLIC ACTIVITIES capability groups (AutoCAD, Revit, 3dsMax, Inventor) with 13 Autodesk-published public activities: AutoCAD.PlotToPDF+prod, AutoCAD.AcSvfPublish+prod, AutoCAD.AcF2dPublish+prod, AutoCAD.AcLMVPublish+prod, Autodesk.Nop+Latest, Revit.RvtIOSketchItActivity2018+prod, Revit.RvtIOSandboxTestActivity2018+prod, 3dsMax.bakeToTexture+Latest, 3dsMax.HelloWorld+Latest, Inventor.ChangeParams+prod, Inventor.iLogic_Volume2020+prod, Inventor.Configuration+Beta, Inventor.BasicPluginTest+prod. All marked callable=true with workItemTemplate. PlotToPDF and Nop args VERIFIED; others marked NEEDS_LIVE_VERIFICATION.\n[v2 patch] Removed 11 stale 404 activities (AcSvf,AcF2d,AcLMV,RevitSketchIt,RevitSandboxTest,InventorChangeParams,InventorILogicVolume,InventorConfiguration,InventorBasicPluginTest,3dsMaxBakeToTexture,3dsMaxHelloWorld). Removed empty Revit+Inventor public-activities groups. Fixed PlotToPDF Result verb put\u2192post. Added: AutoCAD.PlotSheetsetToPDF+prod, 3dsMax.UVUnwrapMesh+prod/+latest, 3dsMax.OpenNetworkTests+Latest, Fusion.ScriptJob+Latest, Fusion.ScriptBundleJob+Latest, Autodesk.Long/ReportZip/VarArg* test utilities. All entries verified against live DA API (2026-05-25).\nauthStrategy:3LO tagged on 14 capabilities (ACC/BIM360/DM/FGE/Params/DX) \u2014 2LO fallback silent failures fixed",
+  "patchedAt": "2026-05-28T19:02:45Z",
+  "patchNotes": "v1.9.7 \u2014 Added 4 PUBLIC ACTIVITIES capability groups (AutoCAD, Revit, 3dsMax, Inventor) with 13 Autodesk-published public activities: AutoCAD.PlotToPDF+prod, AutoCAD.AcSvfPublish+prod, AutoCAD.AcF2dPublish+prod, AutoCAD.AcLMVPublish+prod, Autodesk.Nop+Latest, Revit.RvtIOSketchItActivity2018+prod, Revit.RvtIOSandboxTestActivity2018+prod, 3dsMax.bakeToTexture+Latest, 3dsMax.HelloWorld+Latest, Inventor.ChangeParams+prod, Inventor.iLogic_Volume2020+prod, Inventor.Configuration+Beta, Inventor.BasicPluginTest+prod. All marked callable=true with workItemTemplate. PlotToPDF and Nop args VERIFIED; others marked NEEDS_LIVE_VERIFICATION.\n[v2 patch] Removed 11 stale 404 activities (AcSvf,AcF2d,AcLMV,RevitSketchIt,RevitSandboxTest,InventorChangeParams,InventorILogicVolume,InventorConfiguration,InventorBasicPluginTest,3dsMaxBakeToTexture,3dsMaxHelloWorld). Removed empty Revit+Inventor public-activities groups. Fixed PlotToPDF Result verb put\u2192post. Added: AutoCAD.PlotSheetsetToPDF+prod, 3dsMax.UVUnwrapMesh+prod/+latest, 3dsMax.OpenNetworkTests+Latest, Fusion.ScriptJob+Latest, Fusion.ScriptBundleJob+Latest, Autodesk.Long/ReportZip/VarArg* test utilities. All entries verified against live DA API (2026-05-25).\nauthStrategy:3LO tagged on 14 capabilities (ACC/BIM360/DM/FGE/Params/DX) \u2014 2LO fallback silent failures fixed\nCapability descriptions updated for ACC vs DM routing clarity",
   "summary": {
     "domains": 5,
     "engines": 5,
@@ -31828,7 +31828,7 @@
                       "discovery": "get_capability('bim360:account-admin.project_management') \u2192 Registry match"
                     }
                   },
-                  "description": "Manage BIM 360 account projects, companies, and users. Legacy BIM360 endpoints at /hq/v1; newer ACC equivalents at /construction/admin/v1.",
+                  "description": "Legacy BIM 360 account project management (/hq/v1). Use for BIM360-specific project creation and listing. For newer ACC accounts prefer acc:hub-admin.projects instead.",
                   "apiVersion": "v1 / v2",
                   "region": [
                     "US",
@@ -31974,7 +31974,8 @@
                       "sourceVerificationStatus": "VERIFIED"
                     }
                   ],
-                  "authStrategy": "3LO"
+                  "authStrategy": "3LO",
+                  "note": "Legacy endpoints. Requires 3LO user token + account_id."
                 }
               ]
             },
@@ -40954,7 +40955,7 @@
                   "version": "v1",
                   "apiId": "autodesk-product-apis:acc",
                   "capabilityGroupId": "autodesk-product-apis:acc:hub-administration",
-                  "description": "ACC AdminProjects capability \u2014 acc.hub-admin.projects",
+                  "description": "Account-level project management via the ACC Admin API (/construction/admin/v1). Use for listing, creating, updating, and configuring projects in an ACC account. PREFERRED OVER aps:dm.hubs_projects for all project admin tasks \u2014 ACC Admin API returns richer project metadata and works with user identity token.",
                   "apiVersion": "v1 (GA)",
                   "region": [
                     "US",
@@ -41169,7 +41170,8 @@
                       "sourceVerificationStatus": "PARTIALLY_VERIFIED"
                     }
                   ],
-                  "authStrategy": "3LO"
+                  "authStrategy": "3LO",
+                  "note": "Requires 3LO user token. Use when intent is: list projects, create project, get project details, update project status."
                 },
                 {
                   "id": "acc:hub-admin.users",
@@ -55753,7 +55755,7 @@
                       "discovery": "get_capability('aps.dm.hubs_projects') \u2192 Registry match"
                     }
                   },
-                  "description": "Navigate hub \u2192 project \u2192 top-folder hierarchy for any signed-in user or service account.",
+                  "description": "Data Management API \u2014 hub and project navigation for file-tree access. Use for: discovering hub IDs, navigating to a project to access its file folders. NOT FOR account-level project admin \u2014 use acc:hub-admin.projects instead. NOT FOR listing all projects in an account \u2014 use acc:hub-admin.projects instead.",
                   "apiVersion": "v2",
                   "region": [
                     "US",
@@ -55970,7 +55972,8 @@
                       "callable": true
                     }
                   ],
-                  "authStrategy": "3LO"
+                  "authStrategy": "3LO",
+                  "note": "Primary use: resolve hub_id or project_id before calling aps:dm.folders. For project listing/admin, prefer acc:hub-admin."
                 }
               ]
             },
@@ -56029,7 +56032,7 @@
                       "discovery": "get_capability('aps.dm.folders') \u2192 Registry match"
                     }
                   },
-                  "description": "Folder CRUD + search + navigation in ACC/BIM360/A360 project file trees.",
+                  "description": "Data Management API \u2014 folder navigation, listing, creation, and search within an ACC/BIM360 project. Use for: browsing folder trees, listing folder contents, searching for files. Requires a project_id \u2014 get it from acc:hub-admin.projects or aps:dm.hubs_projects first.",
                   "apiVersion": "v2",
                   "region": [
                     "US",
@@ -56290,7 +56293,8 @@
                       "callable": true
                     }
                   ],
-                  "authStrategy": "3LO"
+                  "authStrategy": "3LO",
+                  "note": "File/folder navigation within a project. Not for project-level admin."
                 },
                 {
                   "id": "aps:dm.items_versions",
@@ -56338,7 +56342,7 @@
                       "discovery": "get_capability('aps.dm.items_versions') \u2192 Registry match"
                     }
                   },
-                  "description": "Item (file lineage) and version CRUD \u2014 the core of file upload, version-add, and history queries.",
+                  "description": "Data Management API \u2014 file (item) and version management within an ACC/BIM360 project. Use for: uploading files, getting file history, downloading specific versions. Requires folder_id from aps:dm.folders.",
                   "apiVersion": "v2",
                   "region": [
                     "US",
@@ -56803,7 +56807,8 @@
                       "callable": true
                     }
                   ],
-                  "authStrategy": "3LO"
+                  "authStrategy": "3LO",
+                  "note": "File lifecycle within a project. Not for project-level admin."
                 }
               ]
             },

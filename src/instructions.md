@@ -12,6 +12,23 @@ RVT RFA RTE RFT DWG DXF DWT DWS DWF DWFX IPT IAM IDW IPN IDE F3D F3Z CAM360 MAX 
 
 These are Autodesk proprietary formats. DO NOT attempt to read, parse, or process them using Python, bash, olefile, rvt-meta, or any local library — they require APS cloud services and will fail or produce wrong results locally.
 
+── ACC vs DATA MANAGEMENT API — ROUTING RULES ───────────────────────────
+
+These two API families overlap on "projects" — always pick based on intent:
+
+| Intent | Use | NOT |
+|--------|-----|-----|
+| List all projects in an account | acc:hub-admin.projects | aps:dm.hubs_projects |
+| Create / update a project | acc:hub-admin.projects | aps:dm.hubs_projects |
+| Get project members / users | acc:* | aps:dm.* |
+| Find a hub ID or project ID for file access | aps:dm.hubs_projects | acc:hub-admin.projects |
+| Browse folders / files inside a project | aps:dm.folders | acc:hub-admin.* |
+| Upload / download / version a file | aps:dm.items_versions | acc:hub-admin.* |
+| BIM360 legacy account ops | bim360:account-admin.* | acc:hub-admin.* |
+
+Rule of thumb: **acc:* = account admin (projects, members, config). aps:dm.* = file tree navigation within a project.**
+If the user says "my projects", "my account", "list projects", "create project" → acc:hub-admin.projects FIRST.
+
 ── TOOL SELECTION ───────────────────────────────────────────────────────
 
 Use this decision tree every time before picking a tool:

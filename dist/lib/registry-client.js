@@ -177,12 +177,28 @@ function scoreCapability(c, terms) {
         else if (haystack.includes(term))
             score += 3;
     }
-    // Fix C: boost aps:md.jobs when intent is viewer/translate — prevents DWG DA capabilities from outranking MD
+    // Boost aps:md.jobs when intent is viewer/translate — prevents DWG DA capabilities from outranking MD
     const viewerTerms = ["viewer", "view", "svf2", "translate", "translation", "derivative", "manifest"];
     const isViewerIntent = terms.some((t) => viewerTerms.includes(t));
     const isTranslationCap = c.id.includes("md.jobs") || c.id.includes("translation");
     if (isViewerIntent && isTranslationCap)
         score += 20;
+    // Boost/demote specific capabilities based on ACC admin vs DM file-navigation intent.
+    // Uses exact-term matching to avoid partial matches (e.g. "project" alone doesn't trigger ACC boost).
+    const ACC_ADMIN_TERMS = new Set(["acc", "account", "admin", "bim360"]);
+    const DM_NAV_TERMS = new Set(["folder", "folders", "file", "files", "browse", "navigate", "version", "upload", "download", "item"]);
+    const ACC_ADMIN_CAPS = new Set(["acc:hub-admin.projects", "bim360:account-admin.project_management"]);
+    const DM_NAV_CAPS = new Set(["aps:dm.hubs_projects", "aps:dm.folders", "aps:dm.items_versions", "aps:dm.refs"]);
+    const isAccAdminIntent = terms.some((t) => ACC_ADMIN_TERMS.has(t));
+    const isDmNavIntent = terms.some((t) => DM_NAV_TERMS.has(t));
+    if (isAccAdminIntent && ACC_ADMIN_CAPS.has(c.id))
+        score += 25;
+    if (isAccAdminIntent && DM_NAV_CAPS.has(c.id))
+        score -= 10;
+    if (isDmNavIntent && DM_NAV_CAPS.has(c.id))
+        score += 15;
+    if (isDmNavIntent && ACC_ADMIN_CAPS.has(c.id))
+        score -= 5;
     return score;
 }
 export function findCapabilityById(id) {
