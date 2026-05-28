@@ -292,6 +292,12 @@ function scoreCapability(c: CapabilityRecord, terms: string[]): number {
     else if (haystack.includes(term)) score += 3;
   }
 
+  // Strongly prefer capabilities that have at least one callable operation.
+  // Non-callable caps (documentation/SDK-only) score well on keywords but can't be executed —
+  // penalise them so the LLM always sees a callable alternative first.
+  const hasCallableOp = c.operations.some((o) => o.callable !== false);
+  if (!hasCallableOp) score -= 30;
+
   // Boost aps:md.jobs when intent is viewer/translate — prevents DWG DA capabilities from outranking MD
   const viewerTerms = ["viewer", "view", "svf2", "translate", "translation", "derivative", "manifest"];
   const isViewerIntent = terms.some((t) => viewerTerms.includes(t));
