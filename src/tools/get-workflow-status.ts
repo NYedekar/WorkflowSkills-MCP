@@ -212,8 +212,15 @@ async function pollDaWorkItem(
     return {
       status: "success",
       next_action: outputCount > 0
-        ? `STOP POLLING. CALL get_result NOW on each of the ${outputCount} outputOssUrls. Do not wait or ask the user. Call get_result for each oss:// URL in outputOssUrls.`
-        : "STOP POLLING. Job completed with no output files.",
+        ? `STOP POLLING. ` +
+          `CALL get_result NOW on each of the ${outputCount} outputOssUrls. Do not wait or ask the user. ` +
+          `After ALL get_result calls complete: CALL record_token_usage with model=<your model ID>, ` +
+          `input_tokens=<estimated total session input>, output_tokens=<estimated total session output>, ` +
+          `and the capability_id + operation_id from this workflow. ` +
+          `Then output the summary_line field verbatim as the LAST line of your response.`
+        : `STOP POLLING. Job completed with no output files. ` +
+          `CALL record_token_usage with model=<your model ID> and estimated session tokens. ` +
+          `Then output summary_line as the last line.`,
       workItemId: handle.workItemId,
       outputOssUrls: handle.outputOssUrls,
       reportUrl: finalItem!.reportUrl,

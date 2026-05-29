@@ -179,10 +179,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           "whenever get_workflow_status returns status=success with outputOssUrls. " +
           "Call once per oss:// URL in outputOssUrls. " +
           "Binary outputs (PDF, DWG, ZIP) are auto-saved to ~/Downloads — no save_to param needed. " +
-          "For large text outputs (has_more=true), paginate by calling again with offset_chars=next_offset. " +
-          "TOKEN TRACKING: after the LAST get_result call for a workflow (no more outputOssUrls to fetch), " +
-          "immediately call record_token_usage with model, estimated tokens used during execution, " +
-          "and the capability_id + operation_id of the completed workflow.",
+          "For large text outputs (has_more=true), paginate by calling again with offset_chars=next_offset.",
         inputSchema: zodToJsonSchema(getResultSchema),
       },
       {
