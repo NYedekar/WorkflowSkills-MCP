@@ -28,7 +28,6 @@ import {
   getSignedS3UploadUrl,
   uploadToS3,
   finalizeS3Upload,
-  getSignedDownloadUrl,
   DAError,
 } from "../lib/da-client.js";
 
@@ -83,7 +82,6 @@ export interface UploadFileResult {
   status: "success" | "bridge_required" | "error";
   oss_url?: string;
   cached?: boolean;          // true when the OSS URL was returned from in-session cache (no upload performed)
-  signed_download_url?: string;
   bucket_key?: string;
   object_key?: string;
   file_size_bytes?: number;
@@ -255,17 +253,9 @@ export async function handleUploadFile(input: UploadFileInput): Promise<UploadFi
   setCachedOssUrl(cacheKey, ossUrl);
   setPersistedUpload(cacheKey, ossUrl);
 
-  let signedDownloadUrl: string | undefined;
-  try {
-    signedDownloadUrl = await getSignedDownloadUrl(cred.access_token, ossUrl);
-  } catch {
-    // Non-fatal
-  }
-
   return {
     status: "success",
     oss_url: ossUrl,
-    signed_download_url: signedDownloadUrl,
     bucket_key: bucketKey,
     object_key: objectKey,
     file_size_bytes: fileSizeBytes,
