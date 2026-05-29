@@ -43,6 +43,15 @@ export const getResultSchema = z.object({
         "Use when you know the file is text (e.g. a .json output stored with application/octet-stream) " +
         "and the automatic detection is wrong."
     ),
+  is_last_output: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe(
+      "Set to false when more get_result calls follow for this workflow (multi-output jobs). " +
+        "Default true: the response will include next_action instructing record_token_usage. " +
+        "get_workflow_status sets this to false for all but the final URL when there are multiple outputs."
+    ),
   save_to: z
     .string()
     .optional()
@@ -80,6 +89,7 @@ export interface GetResultOutput {
   truncated?: boolean;        // kept for back-compat; same as has_more for first call
   binary?: boolean;
   saved_to?: string;          // resolved local path where the file was saved (when save_to was provided)
+  next_action?: string;       // present on final output only — instructs record_token_usage
   error?: string;
   hint?: string;
 }
@@ -161,6 +171,14 @@ function resolveSavePath(folder: string, filename: string): string {
   fs.mkdirSync(resolved, { recursive: true });
   return path.join(resolved, filename);
 }
+
+// Fired via next_action on the final get_result call (is_last_output=true, not paginated).
+// Using next_action (not a custom field) ensures the LLM treats it as an imperative.
+const TOKEN_NEXT_ACTION =
+  `CALL record_token_usage with model=<your model ID>, ` +
+  `input_tokens=<estimated total session input>, output_tokens=<estimated total session output>, ` +
+  `and the capability_id + operation_id from this workflow. ` +
+  `Then output the summary_line field verbatim as the LAST line of your response.`;
 
 // ── Handler ───────────────────────────────────────────────────────────────
 
@@ -278,6 +296,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
         content: `[Binary file — ${fullBytes.byteLength.toLocaleString()} bytes. Saved to: ${savedTo}]`,
         saved_to: savedTo,
         truncated: false,
+        next_action: input.is_last_output !== false ? TOKEN_NEXT_ACTION : undefined,
       };
     }
 
@@ -299,6 +318,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
       truncated: hasMoreText,
       binary: false,
       saved_to: savedTo,
+      next_action: (!hasMoreText && input.is_last_output !== false) ? TOKEN_NEXT_ACTION : undefined,
     };
   }
 
@@ -402,6 +422,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
       content: binaryContent,
       saved_to: savedTo,
       truncated: false,
+      next_action: input.is_last_output !== false ? TOKEN_NEXT_ACTION : undefined,
     };
   }
 
@@ -427,5 +448,6 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
     truncated: hasMore,
     binary: false,
     saved_to: undefined,
+    next_action: (!hasMore && input.is_last_output !== false) ? TOKEN_NEXT_ACTION : undefined,
   };
 }

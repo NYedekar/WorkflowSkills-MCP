@@ -211,6 +211,8 @@ async function pollDaWorkItem(
     const urls = handle.outputOssUrls;
     const outputCount = urls.length;
 
+    // Token tracking fires via next_action in get_result (is_last_output=true on the final URL).
+    // Zero-output jobs have no get_result call, so handle token tracking inline here.
     const TOKEN_SUFFIX =
       `CALL record_token_usage with model=<your model ID>, ` +
       `input_tokens=<estimated total session input>, output_tokens=<estimated total session output>, ` +
@@ -221,16 +223,15 @@ async function pollDaWorkItem(
     if (outputCount === 0) {
       nextAction = `STOP POLLING. Job completed with no output files. ${TOKEN_SUFFIX}`;
     } else if (outputCount === 1) {
-      nextAction =
-        `STOP POLLING. CALL get_result for ${urls[0]}. ` +
-        `After get_result returns: ${TOKEN_SUFFIX}`;
+      nextAction = `STOP POLLING. CALL get_result for ${urls[0]}. Then follow the next_action in the get_result response.`;
     } else {
+      // Pass is_last_output=false for all but the last URL to avoid double record_token_usage calls.
       const steps = urls.map((u, i) =>
         i < urls.length - 1
-          ? `CALL get_result for ${u}`
-          : `CALL get_result for ${u} — after this last get_result returns: ${TOKEN_SUFFIX}`
+          ? `CALL get_result for ${u} with is_last_output=false`
+          : `CALL get_result for ${u}`
       );
-      nextAction = `STOP POLLING. ${steps.join(". Then ")}`;
+      nextAction = `STOP POLLING. ${steps.join(". Then ")}. Follow the next_action in the final get_result response.`;
     }
 
     return {
