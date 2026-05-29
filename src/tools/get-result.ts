@@ -4,6 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import { resolveCredential, DEFAULT_SCOPES } from "../auth/credential-resolver.js";
 import { DAError, getSignedS3DownloadUrl } from "../lib/da-client.js";
+import { handleRecordTokenUsage } from "./record-token-usage.js";
 
 export const getResultSchema = z.object({
   oss_url: z
@@ -49,9 +50,28 @@ export const getResultSchema = z.object({
     .default(true)
     .describe(
       "Set to false when more get_result calls follow for this workflow (multi-output jobs). " +
-        "Default true: the response will include next_action instructing record_token_usage. " +
-        "get_workflow_status sets this to false for all but the final URL when there are multiple outputs."
+        "Default true: token usage is auto-recorded when model + estimated tokens are also provided."
     ),
+  model: z
+    .string()
+    .optional()
+    .describe(
+      "Your model ID (e.g. 'claude-sonnet-4-6'). Provide with estimated_input_tokens and " +
+        "estimated_output_tokens when is_last_output=true to auto-record token usage inline — " +
+        "no separate record_token_usage call needed."
+    ),
+  estimated_input_tokens: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Estimated total session input tokens. Provide when is_last_output=true."),
+  estimated_output_tokens: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Estimated total session output tokens. Provide when is_last_output=true."),
   save_to: z
     .string()
     .optional()
@@ -89,7 +109,8 @@ export interface GetResultOutput {
   truncated?: boolean;        // kept for back-compat; same as has_more for first call
   binary?: boolean;
   saved_to?: string;          // resolved local path where the file was saved (when save_to was provided)
-  next_action?: string;       // present on final output only — instructs record_token_usage
+  next_action?: string;       // present on final output only — instructs LLM to output summary_line
+  summary_line?: string;      // token usage summary — output verbatim as last line of response
   error?: string;
   hint?: string;
 }
@@ -172,13 +193,22 @@ function resolveSavePath(folder: string, filename: string): string {
   return path.join(resolved, filename);
 }
 
-// Fired via next_action on the final get_result call (is_last_output=true, not paginated).
-// Using next_action (not a custom field) ensures the LLM treats it as an imperative.
-const TOKEN_NEXT_ACTION =
-  `CALL record_token_usage with model=<your model ID>, ` +
-  `input_tokens=<estimated total session input>, output_tokens=<estimated total session output>, ` +
-  `and the capability_id + operation_id from this workflow. ` +
-  `Then output the summary_line field verbatim as the LAST line of your response.`;
+// Auto-records token usage inline when the LLM passes model + token estimates to get_result.
+// Returns summary_line on success, undefined if params missing or recording fails.
+async function tryAutoRecordTokens(input: GetResultInput): Promise<string | undefined> {
+  if (input.is_last_output === false) return undefined;
+  if (!input.model || !input.estimated_input_tokens || !input.estimated_output_tokens) return undefined;
+  try {
+    const result = await handleRecordTokenUsage({
+      model: input.model,
+      input_tokens: input.estimated_input_tokens,
+      output_tokens: input.estimated_output_tokens,
+    });
+    return result.summary_line;
+  } catch {
+    return undefined;
+  }
+}
 
 // ── Handler ───────────────────────────────────────────────────────────────
 
@@ -286,6 +316,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
     }
 
     if (detected === "binary") {
+      const summaryLine = await tryAutoRecordTokens(input);
       return {
         status: "success",
         oss_url: input.oss_url,
@@ -296,7 +327,8 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
         content: `[Binary file — ${fullBytes.byteLength.toLocaleString()} bytes. Saved to: ${savedTo}]`,
         saved_to: savedTo,
         truncated: false,
-        next_action: input.is_last_output !== false ? TOKEN_NEXT_ACTION : undefined,
+        summary_line: summaryLine,
+        next_action: summaryLine ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
       };
     }
 
@@ -304,6 +336,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
     const raw = new TextDecoder("utf-8", { fatal: false }).decode(fullBytes);
     const windowText = raw.slice(input.offset_chars, input.offset_chars + input.max_chars);
     const hasMoreText = input.offset_chars + windowText.length < raw.length;
+    const summaryLineText = !hasMoreText ? await tryAutoRecordTokens(input) : undefined;
     return {
       status: "success",
       oss_url: input.oss_url,
@@ -318,7 +351,8 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
       truncated: hasMoreText,
       binary: false,
       saved_to: savedTo,
-      next_action: (!hasMoreText && input.is_last_output !== false) ? TOKEN_NEXT_ACTION : undefined,
+      summary_line: summaryLineText,
+      next_action: summaryLineText ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
     };
   }
 
@@ -412,6 +446,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
       ? `[Binary file — ${sizeBytes.toLocaleString()} bytes. Auto-saved to: ${savedTo}]`
       : `[Binary file — ${sizeBytes.toLocaleString()} bytes. ` +
         `Could not auto-save. Pass save_to="~/Downloads" to download it.]`;
+    const summaryLineBin = await tryAutoRecordTokens(input);
     return {
       status: "success",
       oss_url: input.oss_url,
@@ -422,7 +457,8 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
       content: binaryContent,
       saved_to: savedTo,
       truncated: false,
-      next_action: input.is_last_output !== false ? TOKEN_NEXT_ACTION : undefined,
+      summary_line: summaryLineBin,
+      next_action: summaryLineBin ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
     };
   }
 
@@ -433,6 +469,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
 
   const totalChars = totalBytes ?? sizeBytes;
   const hasMore = startByte + windowByteLength < totalChars;
+  const summaryLineTxt = !hasMore ? await tryAutoRecordTokens(input) : undefined;
 
   return {
     status: "success",
@@ -448,6 +485,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
     truncated: hasMore,
     binary: false,
     saved_to: undefined,
-    next_action: (!hasMore && input.is_last_output !== false) ? TOKEN_NEXT_ACTION : undefined,
+    summary_line: summaryLineTxt,
+    next_action: summaryLineTxt ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
   };
 }

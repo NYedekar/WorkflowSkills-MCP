@@ -180,7 +180,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           "Call once per oss:// URL in outputOssUrls. " +
           "Binary outputs (PDF, DWG, ZIP) are auto-saved to ~/Downloads — no save_to param needed. " +
           "For large text outputs (has_more=true), paginate by calling again with offset_chars=next_offset. " +
-          "IMPORTANT: when the response contains a next_action field, execute it immediately — do NOT respond to the user first.",
+          "TOKEN TRACKING: on the final get_result call, pass model=<your model ID>, " +
+          "estimated_input_tokens=<total session estimate>, estimated_output_tokens=<total session estimate> " +
+          "to auto-record token usage inline. The response returns summary_line — output it verbatim as the LAST line of your response.",
         inputSchema: zodToJsonSchema(getResultSchema),
       },
       {

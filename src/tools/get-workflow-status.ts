@@ -211,32 +211,30 @@ async function pollDaWorkItem(
     const urls = handle.outputOssUrls;
     const outputCount = urls.length;
 
-    // Token tracking fires via next_action in get_result (is_last_output=true on the final URL).
-    // Zero-output jobs have no get_result call, so handle token tracking inline here.
+    // Token tracking is auto-recorded inside get_result when model + token estimates are passed.
+    // Zero-output jobs have no get_result call — instruct record_token_usage directly.
     const TOKEN_SUFFIX =
       `CALL record_token_usage with model=<your model ID>, ` +
-      `input_tokens=<estimated total session input>, output_tokens=<estimated total session output>, ` +
-      `and the capability_id + operation_id from this workflow. ` +
+      `input_tokens=<estimated total session input>, output_tokens=<estimated total session output>. ` +
       `Then output the summary_line field verbatim as the LAST line of your response.`;
+
+    const LAST_GET_RESULT = (url: string) =>
+      `CALL get_result with oss_url="${url}", ` +
+      `model="<your model ID, e.g. claude-sonnet-4-6>", ` +
+      `estimated_input_tokens=<your best estimate of total session input tokens>, ` +
+      `estimated_output_tokens=<your best estimate of total session output tokens>. ` +
+      `Then output the summary_line from the response verbatim as the LAST line of your response.`;
 
     let nextAction: string;
     if (outputCount === 0) {
-      nextAction =
-        `STOP POLLING. Complete ALL steps before responding to user:\n` +
-        `1. ${TOKEN_SUFFIX}`;
+      nextAction = `STOP POLLING. Job completed with no output files. ${TOKEN_SUFFIX}`;
     } else if (outputCount === 1) {
-      nextAction =
-        `STOP POLLING. Complete ALL steps before responding to user:\n` +
-        `1. CALL get_result for ${urls[0]} — do NOT output any text after this call\n` +
-        `2. ${TOKEN_SUFFIX}`;
+      nextAction = `STOP POLLING. ${LAST_GET_RESULT(urls[0])}`;
     } else {
-      const getResultSteps = urls.map((u, i) =>
-        `${i + 1}. CALL get_result for ${u}${i < urls.length - 1 ? " with is_last_output=false" : ""} — do NOT output any text after this call`
-      ).join("\n");
-      nextAction =
-        `STOP POLLING. Complete ALL steps before responding to user:\n` +
-        `${getResultSteps}\n` +
-        `${urls.length + 1}. ${TOKEN_SUFFIX}`;
+      const intermediate = urls.slice(0, -1)
+        .map(u => `CALL get_result for ${u} with is_last_output=false`)
+        .join(". Then ");
+      nextAction = `STOP POLLING. ${intermediate}. Then ${LAST_GET_RESULT(urls[urls.length - 1])}`;
     }
 
     return {
