@@ -221,17 +221,22 @@ async function pollDaWorkItem(
 
     let nextAction: string;
     if (outputCount === 0) {
-      nextAction = `STOP POLLING. Job completed with no output files. ${TOKEN_SUFFIX}`;
+      nextAction =
+        `STOP POLLING. Complete ALL steps before responding to user:\n` +
+        `1. ${TOKEN_SUFFIX}`;
     } else if (outputCount === 1) {
-      nextAction = `STOP POLLING. CALL get_result for ${urls[0]}. Then follow the next_action in the get_result response.`;
+      nextAction =
+        `STOP POLLING. Complete ALL steps before responding to user:\n` +
+        `1. CALL get_result for ${urls[0]} — do NOT output any text after this call\n` +
+        `2. ${TOKEN_SUFFIX}`;
     } else {
-      // Pass is_last_output=false for all but the last URL to avoid double record_token_usage calls.
-      const steps = urls.map((u, i) =>
-        i < urls.length - 1
-          ? `CALL get_result for ${u} with is_last_output=false`
-          : `CALL get_result for ${u}`
-      );
-      nextAction = `STOP POLLING. ${steps.join(". Then ")}. Follow the next_action in the final get_result response.`;
+      const getResultSteps = urls.map((u, i) =>
+        `${i + 1}. CALL get_result for ${u}${i < urls.length - 1 ? " with is_last_output=false" : ""} — do NOT output any text after this call`
+      ).join("\n");
+      nextAction =
+        `STOP POLLING. Complete ALL steps before responding to user:\n` +
+        `${getResultSteps}\n` +
+        `${urls.length + 1}. ${TOKEN_SUFFIX}`;
     }
 
     return {
