@@ -180,6 +180,11 @@ async function tryAutoRecordTokens(input) {
         return undefined;
     }
 }
+// Reminder injected into every is_last_output=false response.
+// Ensures the LLM calls record_token_usage after the final output even with no summary_line.
+const MULTI_JOB_TOKEN_REMINDER = "MULTI-JOB: if all DA job outputs are now retrieved, " +
+    "CALL record_token_usage(model=<your model ID>, input_tokens=<total session estimate>, output_tokens=<total session estimate>) " +
+    "IMMEDIATELY. Then output the summary_line field verbatim as the LAST line of your response before finishing.";
 // ── Handler ───────────────────────────────────────────────────────────────
 export async function handleGetResult(input) {
     const withoutScheme = input.oss_url.replace(/^oss:\/\//, "");
@@ -300,7 +305,7 @@ export async function handleGetResult(input) {
                 saved_to: savedTo,
                 truncated: false,
                 summary_line: summaryLine,
-                next_action: summaryLine ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+                next_action: summaryLine ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
             };
         }
         // Text: extract content window directly from in-memory bytes.
@@ -325,7 +330,7 @@ export async function handleGetResult(input) {
                 summary_line: summaryLine,
                 next_action: `File auto-saved to ${savedTo}. ` +
                     `To read inline, call get_result with oss_url="${input.oss_url}", read_content=true.` +
-                    (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : ""),
+                    (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? ` ${MULTI_JOB_TOKEN_REMINDER}` : "")),
             };
         }
         const windowText = raw.slice(input.offset_chars, input.offset_chars + input.max_chars);
@@ -346,7 +351,7 @@ export async function handleGetResult(input) {
             binary: false,
             saved_to: savedTo,
             summary_line: summaryLineText,
-            next_action: summaryLineText ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+            next_action: summaryLineText ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
         };
     }
     // ── No save_to: range fetch for detection + text content ──────────────────
@@ -455,7 +460,7 @@ export async function handleGetResult(input) {
             saved_to: savedTo,
             truncated: false,
             summary_line: summaryLineBin,
-            next_action: summaryLineBin ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+            next_action: summaryLineBin ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
         };
     }
     // ── Text: decode the fetched slice, extract the content window ────────────
@@ -514,7 +519,7 @@ export async function handleGetResult(input) {
                 summary_line: summaryLine,
                 next_action: `File auto-saved to ${savedTo}. ` +
                     `To read inline, call get_result with oss_url="${input.oss_url}", read_content=true.` +
-                    (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : ""),
+                    (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? ` ${MULTI_JOB_TOKEN_REMINDER}` : "")),
             };
         }
         // Auto-save failed — fall through to normal inline return
@@ -536,6 +541,6 @@ export async function handleGetResult(input) {
         binary: false,
         saved_to: undefined,
         summary_line: summaryLineTxt,
-        next_action: summaryLineTxt ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+        next_action: summaryLineTxt ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
     };
 }
