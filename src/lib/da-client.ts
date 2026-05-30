@@ -1,5 +1,7 @@
 // APS Design Automation v3 API client
 
+import { recordApiCall } from "./rate-limiter.js";
+
 const DA_REGION = process.env.APS_DA_REGION ?? "us-east";
 const DA_BASE = `https://developer.api.autodesk.com/da/${DA_REGION}/v3`;
 const OSS_BASE = "https://developer.api.autodesk.com/oss/v2";
@@ -26,6 +28,7 @@ async function fetchWithTimeout(
       ? AbortSignal.any([controller.signal, parentSignal])
       : controller.signal;
     try {
+      recordApiCall(); // count every outbound APS/S3 request toward RPM limit
       return await fetch(url, { ...options, signal });
     } catch (err) {
       clearTimeout(timer);
@@ -264,6 +267,43 @@ export async function pollWorkItem(
   }
 
   throw new DAError(`WorkItem ${workItemId} timed out after ${timeoutMs}ms`);
+}
+
+// Batch status check for multiple work items in one HTTP call.
+// DA v3 supports POST /v3/workitems/status with body { ids: string[] }.
+// Used by batch-poller.ts to stay within APS 150 RPM limit at scale.
+export async function getBatchWorkItemStatus(
+  token: string,
+  workItemIds: string[]
+): Promise<Map<string, WorkItemResult>> {
+  if (workItemIds.length === 0) return new Map();
+
+  const res = await fetchWithTimeout(
+    `${DA_BASE}/workitems/status`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ids: workItemIds }),
+    },
+    15_000,
+    1 // no retries for batch — stale data is preferable to double-hitting on partial success
+  );
+
+  if (!res.ok) {
+    throw new DAError(`Batch workitem status failed: ${res.statusText}`, res.status);
+  }
+
+  const json = (await res.json()) as { results?: WorkItemResult[] } | WorkItemResult[];
+  const items: WorkItemResult[] = Array.isArray(json) ? json : (json.results ?? []);
+
+  const map = new Map<string, WorkItemResult>();
+  for (const item of items) {
+    if (item.id) map.set(item.id, item);
+  }
+  return map;
 }
 
 export async function getSignedDownloadUrl(

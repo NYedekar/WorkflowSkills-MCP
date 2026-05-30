@@ -9,6 +9,7 @@ import { getTwoLeggedToken } from "./auth/aps-token-client.js";
 import { loadSecret } from "./auth/keychain.js";
 import { setCachedToken } from "./auth/token-cache.js";
 import { DEFAULT_SCOPES } from "./auth/credential-resolver.js";
+import { getRateLimitWarning } from "./lib/rate-limiter.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_INSTRUCTIONS = readFileSync(join(__dirname, "instructions.md"), "utf-8");
 import { createWorkflowSchema, handleCreateWorkflow, } from "./tools/create-workflow.js";
@@ -49,31 +50,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "authenticate_aps_3lo",
-                description: "Perform 3-legged OAuth (3LO) to obtain a user-identity token required for ACC account-level " +
-                    "operations such as creating projects, managing users, and other admin APIs that reject 2LO " +
-                    "client-credential tokens. Opens the Autodesk authorization page in your browser, waits for " +
-                    "you to approve, then stores the token automatically. The refresh token is saved to the OS " +
-                    "keychain so future MCP restarts auto-renew without re-authorizing. Call this once before " +
-                    "any ACC Admin operation (e.g. acc.admin_create_project).",
+                description: "Obtain a user-identity (3LO) token for ACC admin operations that reject 2LO client-credential tokens. " +
+                    "Opens the Autodesk authorization page in your browser; stores refresh token in the OS keychain for auto-renewal. " +
+                    "Call once before any ACC Admin or BIM 360 user-identity operation. No user confirmation needed.",
                 inputSchema: zodToJsonSchema(authenticateAps3LOSchema),
             },
             {
                 name: "get_capability",
-                description: "CALL THIS FIRST — before any other response — whenever any of these file extensions appear: " +
-                    "RVT RFA RTE RFT DWG DXF DWT DWS DWF DWFX IPT IAM IDW IPN IDE F3D F3Z CAM360 MAX MA MB " +
-                    "NWD NWF NWC IFC FBX STEP STP IGES IGS SAT JT WIRE IWMODEL IMX NAS BDF FEM OP2 " +
-                    "RCP RCS PTS E57 LAS LAZ ADSK ADSKLIB ATF ASM SMT SMB OBJ STL. " +
-                    "Also call when any Autodesk cloud service is referenced (ACC, BIM 360, Autodesk Docs, " +
-                    "Fusion Hub, Vault, APS OSS, ShotGrid, Tandem, Forma, ReCap Cloud). " +
-                    "DO NOT tell the user you cannot access their file — this MCP server runs as a local process " +
-                    "on the user's Mac and reads local file paths directly. " +
-                    "Searches 260+ capabilities across Design Automation (Engine-API) and APS REST (Platform-API). " +
-                    "Returns capability_id and operation_id for execute_workflow / process_file. " +
-                    "CALLABLE CHECK: always inspect the callable field on each returned operation. " +
-                    "callable=true → proceed. callable=false → DO NOT use that operation. " +
-                    "AFTER all get_capability calls complete: output a brief execution plan to the user " +
-                    "(task name, capability_id, operation_id, execution pattern) BEFORE calling upload_file, " +
-                    "process_file, or execute_workflow. Then proceed immediately without waiting.",
+                description: "CALL THIS FIRST when any Autodesk file extension or cloud service appears. " +
+                    "Full format list and routing rules are in the MCP server instructions — see MANDATORY TRIGGER and ACC/DM tables. " +
+                    "Searches 260+ capabilities (Engine-API + APS REST). Returns capability_id and operation_id. " +
+                    "CALLABLE CHECK: callable=true → proceed. callable=false → rephrase query and retry. " +
+                    "After all lookups: output a brief execution plan (task, capability_id, operation_id, pattern) before any upload or job submit.",
                 inputSchema: zodToJsonSchema(getCapabilitySchema),
             },
             {
@@ -97,6 +85,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 description: "Process a local Autodesk file on this Mac. The MCP server runs as a LOCAL process and reads " +
                     "Mac filesystem paths directly (~/Downloads/, /Users/..., OneDrive paths). " +
                     "DO NOT say you cannot access a local path — pass it straight to this tool. " +
+                    "Use ONLY when exactly ONE intent targets this file path. " +
+                    "For 2+ intents on the same file: use upload_file → parallel execute_workflow (CASE B) instead — process_file re-uploads on every call. " +
                     "Fast path: auto-selects capability, uploads to APS, runs the job, returns results. " +
                     "On pending response: immediately chains to get_workflow_status → get_result → get_download_link — " +
                     "no user confirmation needed for any step.",
@@ -104,7 +94,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "upload_file",
-                description: "Upload a file to APS OSS.",
+                description: "Upload a file to APS OSS. Pass file_path for a local Mac file, or file_url for an HTTPS URL " +
+                    "(e.g. OneDrive 'Anyone with the link' sharing URL or any public HTTPS file URL). " +
+                    "Returns oss:// URL for use with execute_workflow.",
                 inputSchema: zodToJsonSchema(uploadFileSchema),
             },
             {
@@ -113,7 +105,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     "whenever get_workflow_status returns status=success with outputOssUrls. " +
                     "Call once per oss:// URL in outputOssUrls. " +
                     "Binary outputs (PDF, DWG, ZIP) are auto-saved to ~/Downloads — no save_to param needed. " +
-                    "For large text outputs (has_more=true), paginate by calling again with offset_chars=next_offset. " +
+                    "Large text outputs (CSV, JSON > 10K chars) are also auto-saved to ~/Downloads; a 500-char preview is returned. " +
+                    "Pass read_content=true to return the full text inline instead. " +
                     "TOKEN TRACKING: on the final get_result call, pass model=<your model ID>, " +
                     "estimated_input_tokens=<total session estimate>, estimated_output_tokens=<total session estimate> " +
                     "to auto-record token usage inline. The response returns summary_line — output it verbatim as the LAST line of your response.",
@@ -121,12 +114,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "get_workflow_status",
-                description: "Poll the status of a running Autodesk workflow. CALL THIS AUTOMATICALLY — no user confirmation needed. " +
+                description: "Poll the status of one or more running Autodesk DA jobs. CALL THIS AUTOMATICALLY — no user confirmation needed. " +
+                    "MULTI-JOB: pass workflow_handle as an ARRAY to poll all jobs in parallel in one call (wall time = slowest, not sum). " +
                     "When status=pending: IMMEDIATELY call again with the same workflow_handle — do not ask the user, do not wait. " +
                     "DO NOT output any text between polls — no explanations, no 'retrying', no timeout notes. Just call again silently. " +
                     "Each call polls for up to 25s then returns — this is fixed and correct, do NOT try to change it. " +
-                    "Revit and AutoCAD jobs take 3–8 minutes — keep polling until status=success or failed. " +
-                    "When status=success: STOP polling and call get_result on each outputOssUrl.",
+                    "Revit and AutoCAD jobs take 3–8 minutes — keep polling until overall_status=success or failed. " +
+                    "When done: STOP polling and call get_result on each outputOssUrl in the next_action chain.",
                 inputSchema: zodToJsonSchema(getWorkflowStatusSchema),
             },
             {
@@ -153,22 +147,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             {
                 name: "record_token_usage",
-                description: "Record the token consumption of this AI session to a persistent local log. " +
-                    "Call this after any significant tool use or at the end of a workflow to capture how many " +
-                    "prompt (input) and completion (output) tokens the AI client spent executing tasks through " +
-                    "this MCP server. Also records cache_read_tokens and cache_write_tokens when available. " +
-                    "Optionally link the record to a workflow_id or capability_id for per-workflow cost tracking. " +
+                description: "Record AI token usage for this session to a persistent local log. " +
+                    "Called automatically by get_result on the final output. Call explicitly after multi-job sessions. " +
                     `Current session ID: ${SERVER_SESSION_ID}. ` +
-                    "Returns running session totals so you can see cumulative usage without querying the log.",
+                    "Returns running totals and summary_line — output summary_line verbatim as the last line of your response.",
                 inputSchema: zodToJsonSchema(recordTokenUsageSchema),
             },
             {
                 name: "get_token_usage",
-                description: "Query the persistent token-usage log written by record_token_usage. " +
-                    "Returns a summary (total input/output/cache tokens, record count) plus breakdowns " +
-                    "by model and by workflow DAG, and a tail of recent raw records. " +
-                    "Supports filtering by date range (since/until), session_id, workflow_id, and model. " +
-                    "Use this to report cost, audit usage, or compare token spend across workflows.",
+                description: "Query the token-usage log written by record_token_usage. " +
+                    "Returns totals, per-model and per-workflow breakdowns, and recent records. " +
+                    "Filter by date range, session_id, workflow_id, or model.",
                 inputSchema: zodToJsonSchema(getTokenUsageSchema),
             },
         ],
@@ -231,8 +220,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     isError: true,
                 };
         }
+        // Inject rate limit warning when approaching APS 150 RPM limit
+        const rateLimitWarning = getRateLimitWarning();
+        const responsePayload = rateLimitWarning && result && typeof result === "object"
+            ? { ...result, _rate_limit_warning: rateLimitWarning }
+            : result;
         return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            content: [{ type: "text", text: JSON.stringify(responsePayload, null, 2) }],
         };
     }
     catch (err) {

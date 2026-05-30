@@ -255,7 +255,7 @@ export async function handleProcessFile(input: ProcessFileInput): Promise<Proces
 
   const outputs: OutputFile[] = await Promise.all(
     allOssUrls.map(async (outUrl) => {
-      const r = await handleGetResult({ oss_url: outUrl, max_chars: input.max_result_chars, offset_chars: 0, force_text: false, is_last_output: true });
+      const r = await handleGetResult({ oss_url: outUrl, max_chars: input.max_result_chars, offset_chars: 0, force_text: false, is_last_output: true, read_content: false });
       // For binary outputs, skip inlining content — return oss_url only so the tool result stays small.
       // The model should call get_download_link or get_result(save_to=...) to retrieve the file.
       if (r.binary) {

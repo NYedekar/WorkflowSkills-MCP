@@ -51,6 +51,12 @@ export class APSNotConfiguredError extends Error {
 //   1. In-memory token cache
 //   2. OS Keychain (client_secret stored by setup.js or authenticate_aps)
 //   3. APS_CLIENT_SECRET environment variable
+//
+// Dedup: if multiple concurrent callers miss the cache simultaneously (e.g. on startup),
+// the first one wins and all others await the same inflight promise.
+// This prevents N × getTwoLeggedToken calls under parallel tool invocation.
+const inflight2LO = new Map<string, Promise<ResolvedCredential>>();
+
 export async function resolveCredential(
   scopes: string[] = DEFAULT_SCOPES
 ): Promise<ResolvedCredential> {
@@ -62,26 +68,43 @@ export async function resolveCredential(
 
   const cacheKey = `2lo:${clientId}:${scopes.slice().sort().join(",")}`;
 
+  // Fast path: cache hit (no lock needed)
   const cached = getCachedToken(cacheKey);
   if (cached) {
     const ttl = getRemainingTtlSeconds(cacheKey) ?? 300;
     return { client_id: clientId, access_token: cached, scopes, expires_in_seconds: ttl };
   }
 
-  let clientSecret = loadSecret(clientId);
-  if (!clientSecret) {
-    clientSecret = process.env.APS_CLIENT_SECRET?.trim() ?? null;
-  }
+  // Dedup: coalesce concurrent cache-miss callers onto one inflight promise
+  const existing = inflight2LO.get(cacheKey);
+  if (existing) return existing;
 
-  if (!clientSecret) {
-    throw new APSNotConfiguredError();
-  }
+  const fetchPromise = (async (): Promise<ResolvedCredential> => {
+    try {
+      // Re-check cache after acquiring "the slot" — a previous waiter may have populated it
+      const rechecked = getCachedToken(cacheKey);
+      if (rechecked) {
+        const ttl = getRemainingTtlSeconds(cacheKey) ?? 300;
+        return { client_id: clientId, access_token: rechecked, scopes, expires_in_seconds: ttl };
+      }
 
-  const token = await getTwoLeggedToken(clientId, clientSecret, scopes);
-  setCachedToken(cacheKey, token.access_token, token.expires_in);
-  const freshTtl = getRemainingTtlSeconds(cacheKey) ?? token.expires_in;
+      let clientSecret = loadSecret(clientId);
+      if (!clientSecret) {
+        clientSecret = process.env.APS_CLIENT_SECRET?.trim() ?? null;
+      }
+      if (!clientSecret) throw new APSNotConfiguredError();
 
-  return { client_id: clientId, access_token: token.access_token, scopes, expires_in_seconds: freshTtl };
+      const token = await getTwoLeggedToken(clientId, clientSecret, scopes);
+      setCachedToken(cacheKey, token.access_token, token.expires_in);
+      const freshTtl = getRemainingTtlSeconds(cacheKey) ?? token.expires_in;
+      return { client_id: clientId, access_token: token.access_token, scopes, expires_in_seconds: freshTtl };
+    } finally {
+      inflight2LO.delete(cacheKey);
+    }
+  })();
+
+  inflight2LO.set(cacheKey, fetchPromise);
+  return fetchPromise;
 }
 
 // ── 3LO: User Token ───────────────────────────────────────────────────────

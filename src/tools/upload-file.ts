@@ -36,10 +36,22 @@ import {
 export const uploadFileSchema = z.object({
   file_path: z
     .string()
+    .optional()
     .describe(
-      "Full path to the file — local folder, ~/Downloads/, or OneDrive (e.g. ~/Library/CloudStorage/OneDrive-Autodesk/…). " +
+      "Full path to the file on this Mac — ~/Downloads/, /Users/..., or OneDrive paths. " +
         "Chat attachments (/mnt/user-data/uploads/) cannot be read by the MCP server — " +
-        "on bridge_required, ask the user for the file's actual Mac path."
+        "on bridge_required, ask the user for the file's actual Mac path. " +
+        "Required unless file_url is provided."
+    ),
+  file_url: z
+    .string()
+    .url()
+    .optional()
+    .describe(
+      "HTTPS URL to fetch and upload directly to APS OSS. " +
+        "Useful for OneDrive 'Anyone with the link' sharing URLs and other public HTTPS file URLs. " +
+        "The MCP server downloads the file server-side and streams it to APS — " +
+        "no local file needed. Provide either file_path or file_url, not both."
     ),
   bucket_key: z
     .string()
@@ -117,6 +129,15 @@ function isSandboxPath(p: string): boolean {
 }
 
 export async function handleUploadFile(input: UploadFileInput): Promise<UploadFileResult> {
+  // ── URL upload path ────────────────────────────────────────────────────────
+  if (input.file_url) {
+    return handleUrlUpload(input);
+  }
+
+  if (!input.file_path) {
+    return { status: "error", error: "Either file_path or file_url must be provided." };
+  }
+
   const resolvedPath = normalizePath(input.file_path);
   const filename = basename(resolvedPath);
   const contentType = detectContentType(filename);
@@ -331,4 +352,112 @@ const CONTENT_TYPES: Record<string, string> = {
 function detectContentType(filename: string): string {
   const ext = extname(filename).toLowerCase();
   return CONTENT_TYPES[ext] ?? "application/octet-stream";
+}
+
+// ── URL upload handler ────────────────────────────────────────────────────
+// Fetches a remote HTTPS URL and uploads the bytes directly to APS OSS.
+// Primary use case: OneDrive "Anyone with the link" sharing URLs.
+
+async function handleUrlUpload(input: UploadFileInput): Promise<UploadFileResult> {
+  const fileUrl = input.file_url!;
+
+  // Derive filename from URL path, falling back to a timestamped default.
+  const urlPath = new URL(fileUrl).pathname;
+  const rawFilename = basename(urlPath) || `upload-${Date.now()}`;
+  // Decode percent-encoding and strip query params that might have leaked into the basename.
+  const filename = decodeURIComponent(rawFilename.split("?")[0]) || rawFilename;
+  const contentType = detectContentType(filename);
+
+  // ── Fetch remote file ─────────────────────────────────────────────────────
+  let fileBuffer: Buffer;
+  let fileSizeBytes: number;
+  try {
+    const fetchController = new AbortController();
+    const fetchTimer = setTimeout(() => fetchController.abort(), 120_000); // 2 min max download
+    let res: Response;
+    try {
+      res = await fetch(fileUrl, { signal: fetchController.signal });
+    } finally {
+      clearTimeout(fetchTimer);
+    }
+    if (!res.ok) {
+      return {
+        status: "error",
+        error: `Failed to fetch URL (HTTP ${res.status}): ${fileUrl}`,
+        hint: "Check the URL is publicly accessible and the sharing link has not expired.",
+      };
+    }
+    const ab = await res.arrayBuffer();
+    fileBuffer = Buffer.from(ab);
+    fileSizeBytes = fileBuffer.byteLength;
+  } catch (err) {
+    return {
+      status: "error",
+      error: `Network error fetching URL: ${String(err)}`,
+      hint: "Check the URL is accessible from this Mac (not blocked by firewall or expired).",
+    };
+  }
+
+  // ── APS auth ──────────────────────────────────────────────────────────────
+  let cred: { client_id: string; access_token: string };
+  try {
+    cred = await resolveCredential(UPLOAD_SCOPES);
+  } catch (err) {
+    return { status: "error", error: `APS auth failed: ${String(err)}`, hint: "Run authenticate_aps first." };
+  }
+
+  const bucketKey = sanitizeBucketKey(input.bucket_key ?? `${cred.client_id}-uploads`);
+  const objectKey = input.object_key ?? filename;
+
+  const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+  if (fileSizeBytes > MAX_UPLOAD_BYTES) {
+    return {
+      status: "error",
+      error: `Remote file too large: ${(fileSizeBytes / 1024 / 1024).toFixed(0)} MB. Maximum is 500 MB.`,
+    };
+  }
+
+  try {
+    await ensureBucketWithPolicy(cred.access_token, bucketKey, input.bucket_policy ?? "transient");
+  } catch (err) {
+    return { status: "error", error: `Could not ensure bucket '${bucketKey}': ${String(err)}` };
+  }
+
+  const PART_SIZE = 5 * 1024 * 1024;
+  const numParts = Math.max(1, Math.ceil(fileSizeBytes / PART_SIZE));
+
+  let signedUpload: { uploadKey: string; urls: string[] };
+  try {
+    signedUpload = await getSignedS3UploadUrl(
+      cred.access_token, bucketKey, objectKey,
+      input.signed_url_expiry_minutes ?? 60, numParts
+    );
+  } catch (err) {
+    return { status: "error", error: `Could not get upload URL: ${String(err)}` };
+  }
+
+  try {
+    for (let i = 0; i < numParts; i++) {
+      const chunk = fileBuffer.slice(i * PART_SIZE, (i + 1) * PART_SIZE) as Buffer;
+      await uploadToS3(signedUpload.urls[i], chunk, contentType);
+    }
+  } catch (err) {
+    return { status: "error", error: `S3 upload failed: ${String(err)}` };
+  }
+
+  try {
+    await finalizeS3Upload(cred.access_token, bucketKey, objectKey, signedUpload.uploadKey);
+  } catch (err) {
+    return { status: "error", error: `Finalize upload failed: ${String(err)}` };
+  }
+
+  const ossUrl = `oss://${bucketKey}/${objectKey}`;
+  return {
+    status: "success",
+    oss_url: ossUrl,
+    bucket_key: bucketKey,
+    object_key: objectKey,
+    file_size_bytes: fileSizeBytes,
+    content_type: contentType,
+  };
 }

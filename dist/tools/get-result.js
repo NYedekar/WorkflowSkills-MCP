@@ -74,6 +74,14 @@ export const getResultSchema = z.object({
         .describe("Override the filename used when saving (requires save_to). " +
         "Use when the OSS object key has a misleading name (e.g. 'result.json' that is actually a PDF). " +
         "Example: 'sampledwg_converted.pdf'. If omitted, the filename is taken from the OSS object key."),
+    read_content: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("Override the large-text auto-save behaviour. When true, return the text content inline even if " +
+        "the file exceeds 10,000 chars (otherwise the file is auto-saved to ~/Downloads and only a " +
+        "500-char preview is returned). Use on follow-up requests when the user asks to read the content " +
+        "of a previously auto-saved file."),
 });
 // ── Content detection ─────────────────────────────────────────────────────
 // APS Design Automation always stores outputs as application/octet-stream regardless
@@ -98,6 +106,10 @@ const BINARY_MAGIC = [
     [0x42, 0x4D], // BMP
     [0x00, 0x01, 0x00, 0x00], // TrueType font / ICO
 ];
+// Auto-save text files larger than this to ~/Downloads instead of returning inline.
+// Prevents huge CSVs / JSONs from filling the LLM context window.
+// Override with read_content=true on get_result to return inline regardless.
+const LARGE_TEXT_THRESHOLD = 10_000; // chars
 function detectContent(bytes, objectKey) {
     if (bytes.length === 0)
         return "text";
@@ -293,6 +305,29 @@ export async function handleGetResult(input) {
         }
         // Text: extract content window directly from in-memory bytes.
         const raw = new TextDecoder("utf-8", { fatal: false }).decode(fullBytes);
+        // Large text auto-save: when save_to is provided but content is huge and read_content=false,
+        // return only a preview to avoid flooding the context window.
+        if (!input.read_content && input.offset_chars === 0 && raw.length > LARGE_TEXT_THRESHOLD) {
+            const preview = raw.slice(0, 500);
+            const summaryLine = await tryAutoRecordTokens(input);
+            return {
+                status: "success",
+                oss_url: input.oss_url,
+                content_type: "application/octet-stream",
+                detected_as: detected,
+                size_bytes: fullBytes.byteLength,
+                total_chars: raw.length,
+                content: `[Large text file — ${raw.length.toLocaleString()} chars. Saved to: ${savedTo}]\n\nPreview (first 500 chars):\n${preview}`,
+                saved_to: savedTo,
+                has_more: false,
+                truncated: false,
+                binary: false,
+                summary_line: summaryLine,
+                next_action: `File auto-saved to ${savedTo}. ` +
+                    `To read inline, call get_result with oss_url="${input.oss_url}", read_content=true.` +
+                    (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : ""),
+            };
+        }
         const windowText = raw.slice(input.offset_chars, input.offset_chars + input.max_chars);
         const hasMoreText = input.offset_chars + windowText.length < raw.length;
         const summaryLineText = !hasMoreText ? await tryAutoRecordTokens(input) : undefined;
@@ -428,6 +463,62 @@ export async function handleGetResult(input) {
     const window = raw.slice(0, input.max_chars);
     const windowByteLength = new TextEncoder().encode(window).byteLength;
     const totalChars = totalBytes ?? sizeBytes;
+    // Large text auto-save: files > 10K chars → save to ~/Downloads + return 500-char preview.
+    // Guard: only on first fetch (offset_chars=0) to avoid interfering with pagination re-calls.
+    // Override: read_content=true bypasses this and returns inline content.
+    if (!input.read_content && input.offset_chars === 0 && totalChars > LARGE_TEXT_THRESHOLD) {
+        const autoFilename = input.save_filename ?? (objectKey.split("/").pop() ?? objectKey);
+        let savedTo;
+        try {
+            let fullBytes;
+            if (res.status === 200) {
+                // Range request already returned the full file — reuse bytes.
+                fullBytes = bytes;
+            }
+            else {
+                const fullController = new AbortController();
+                const fullTimer = setTimeout(() => fullController.abort(), 45_000);
+                let fullRes;
+                try {
+                    fullRes = await fetch(signedUrl, { signal: fullController.signal });
+                }
+                finally {
+                    clearTimeout(fullTimer);
+                }
+                if (!fullRes.ok)
+                    throw new Error(`HTTP ${fullRes.status}`);
+                fullBytes = new Uint8Array(await fullRes.arrayBuffer());
+            }
+            savedTo = resolveSavePath(os.homedir() + "/Downloads", autoFilename);
+            fs.writeFileSync(savedTo, fullBytes);
+        }
+        catch {
+            // Auto-save failed — fall through to inline return below
+        }
+        if (savedTo) {
+            const preview = raw.slice(0, 500);
+            const summaryLine = await tryAutoRecordTokens(input);
+            return {
+                status: "success",
+                oss_url: input.oss_url,
+                content_type: contentTypeHeader,
+                detected_as: detected,
+                size_bytes: sizeBytes,
+                total_chars: totalChars,
+                content: `[Large text file — ${totalChars.toLocaleString()} chars. Auto-saved to: ${savedTo}]\n\n` +
+                    `Preview (first 500 chars):\n${preview}`,
+                saved_to: savedTo,
+                has_more: false,
+                truncated: false,
+                binary: false,
+                summary_line: summaryLine,
+                next_action: `File auto-saved to ${savedTo}. ` +
+                    `To read inline, call get_result with oss_url="${input.oss_url}", read_content=true.` +
+                    (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : ""),
+            };
+        }
+        // Auto-save failed — fall through to normal inline return
+    }
     const hasMore = startByte + windowByteLength < totalChars;
     const summaryLineTxt = !hasMore ? await tryAutoRecordTokens(input) : undefined;
     return {

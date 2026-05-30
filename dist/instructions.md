@@ -48,7 +48,8 @@ STEP 0 — ANALYSE DEPENDENCIES, THEN ROUTE (do this before calling any tool):
     → execute_workflow(oss_url, intent2)  ┘
     One upload. Both DA jobs start simultaneously. Fastest option.
     Do NOT use create_workflow here — it adds sequential overhead with no benefit.
-    Do NOT use process_file multiple times — it re-uploads each time.
+    NEVER call process_file more than once for the same file_path — it re-uploads every time.
+    If 2+ intents target the same file → STOP. You are in CASE B. Use upload_file → parallel execute_workflow.
 
   CASE C — Single intent, one file:
     → process_file(file_path, intent)  (upload + submit in one call, simplest path)
@@ -67,28 +68,6 @@ STEP 0 — ANALYSE DEPENDENCIES, THEN ROUTE (do this before calling any tool):
     drawing.dwg × 1 intent → CASE C: process_file(drawing.dwg)
     no file (ACC)           → CASE E: execute_workflow(acc:hub-admin.projects)
     → Run all three groups concurrently.
-
-1. Single intent + local file (CASE C):
-   → process_file  (fast path: upload + run in one call.)
-
-2. Sequential pipeline on same file (CASE A):
-   → create_workflow(file_path, intents, relationships) — read next_action in response.
-   → execute_workflow with each oss_url IN ORDER, passing prior step's output as next input.
-
-3. Independent intents on same file (CASE B):
-   → upload_file(file_path) → oss_url
-   → execute_workflow(input_file_url=oss_url, ...) for each intent IN PARALLEL.
-   NEVER call process_file for the same file after upload_file — it re-uploads.
-   NEVER pass oss_url to process_file — process_file only accepts local Mac paths.
-
-4. File already in APS OSS (you have an oss:// URL from a prior step)?
-   → execute_workflow directly — no upload needed. DO NOT call process_file with an oss:// URL.
-
-5. No file, just an APS REST operation or info question?
-   → execute_workflow for REST calls. Answer from knowledge for pure info.
-   REST tip: pass all parameters (path, query, body) in the single 'args' field — auto-routed.
-   Example: execute_workflow(capability_id="BucketManagement", operation_id="create_bucket",
-            args={"bucketKey": "my-bucket", "policyKey": "transient"})
 
 ── STANDARD FLOW ────────────────────────────────────────────────────────
 
@@ -164,73 +143,31 @@ NEVER fall back to bash, Python, local libraries, or any non-MCP approach after 
 
 ── MODEL DERIVATIVE FALLBACK (metadata & property extraction) ───────────
 
-When DA extraction capabilities are callable=false, use Model Derivative (APS REST) as a fallback.
+When DA extraction capabilities are callable=false, use Model Derivative (APS REST) as fallback.
+Supports: DWG, DXF, RVT, RFA, F3D, IPT, IAM, IFC, STEP, NWD, SKP, STL, OBJ, and more.
 
-SUPPORTED FORMATS — full object tree + properties:
-  Autodesk native : DWG, DXF (AutoCAD) · RVT, RFA (Revit) · F3D, F3Z (Fusion 360)
-                    IPT, IAM, IDW (Inventor) · MAX (3ds Max) · DWF, DWFX · NWD, NWC (Navisworks)
-  Open/neutral    : IFC · STEP, STP · IGES, IGS · JT · SAT (ACIS) · OBJ · STL · 3DM (Rhino) · SKP (SketchUp)
-  Third-party CAD : SLDPRT, SLDASM (SolidWorks) · CATPART, CATPRODUCT (CATIA)
-                    PRT, ASM (NX/Unigraphics) · PRT, ASM (Creo/Pro-E) · WIRE (Alias)
-  Point clouds    : RCP, RCS (ReCap) — scan metadata only, no BIM properties
-  Geometry-only   : STL, OBJ — mesh + material names, no element properties
+Standard flow: upload → start_translation_job (aps:md.jobs) → poll fetch_manifest until success
+→ list_model_views to get correct modelGuids → fetch_object_tree or query_specific_properties.
+ALWAYS use modelGuids from list_model_views — manifest GUIDs are different and will 404.
+For thumbnails: fetch_thumbnail (aps:md.thumbnail) → get_download_link.
+For large property sets: use query_specific_properties with a $prefix filter, NOT fetch_all_properties.
 
-STANDARD MD EXTRACTION FLOW — execute these steps in order:
-  Step 1 · Upload file (if not already in OSS) → get oss_url
-  Step 2 · execute_workflow(capability_id="aps:md.jobs", operation_id="start_translation_job", input_file_url="<oss_url from upload_file>")
-           → returns urn. If asyncJob=true, poll fetch_manifest until status='success'.
-  Step 3 · execute_workflow(capability_id="aps:md.manifest", operation_id="fetch_manifest", args={"urn": "<urn>"})
-           → confirms translation complete. DO NOT use GUIDs from this manifest for metadata calls.
-  Step 4 · execute_workflow(capability_id="aps:md.metadata", operation_id="list_model_views", args={"urn": "<urn>"})
-           → returns correct modelGuids. ALWAYS use these GUIDs — manifest geometry GUIDs are different and will 404.
-  Step 5a · execute_workflow(capability_id="aps:md.metadata", operation_id="fetch_object_tree", args={"urn": "<urn>", "modelGuid": "<guid>"})
-            → entity/layer/component hierarchy.
-  Step 5b · execute_workflow(capability_id="aps:md.metadata", operation_id="query_specific_properties",
-            args={"urn": "<urn>", "modelGuid": "<guid>", "query": {"$prefix": ["CategoryName"]}})
-            → filtered properties by category. PREFER this over fetch_all_properties to avoid 1MB limit.
-  Step 5c · execute_workflow(capability_id="aps:md.thumbnail", operation_id="fetch_thumbnail", args={"urn": "<urn>"})
-            → PNG preview. Use get_download_link on the result.
-
-WHAT MD COVERS vs GAPS PER PRODUCT:
-  DWG/DXF        COVERS: entity hierarchy, element properties, layer structure, 2D/3D views
-                 GAPS:   xref list, block attributes, drawing history, symbol tables, title block data
-  RVT/RFA        COVERS: full BIM element tree, all Revit parameters, room/space/level data
-                 GAPS:   native warnings, family metadata, workshared structure (use RevitExtractor for those)
-  F3D/F3Z        COVERS: component hierarchy, body/face properties, assembly structure
-                 GAPS:   CAM setups, toolpaths, generative design outcomes, simulation results
-  IPT/IAM/IDW    COVERS: part/assembly hierarchy, component properties, mass/material data
-                 GAPS:   iProperties, BOM tables, frame/tube reports, FEA results
-  MAX            COVERS: scene object hierarchy, material assignments, mesh properties
-                 GAPS:   modifier stacks, animation data, render settings
-  NWD/NWC        COVERS: aggregated model tree, object properties, clash data structure
-                 GAPS:   timeliner sequences, quantification data
-  IFC            COVERS: full BIM element tree, IFC property sets, spatial structure
-                 GAPS:   IFC-specific relationship types beyond spatial containment
-  SLDPRT/SLDASM  COVERS: part/assembly tree, feature names, material data
-                 GAPS:   design tables, configurations, equations
-  CATPART/CATPRD COVERS: part/product tree, component properties
-                 GAPS:   knowledge patterns, DMU navigator data
-  NX/Creo PRT    COVERS: part/assembly hierarchy, body/face properties
-                 GAPS:   parametric expressions, manufacturing attributes
-  STEP/IGES/JT   COVERS: geometry entity hierarchy, basic attributes
-                 GAPS:   application-specific metadata beyond geometry
-  SKP/3DM        COVERS: layer/component hierarchy, material names
-                 GAPS:   plugin-specific metadata, render materials
-  STL/OBJ        COVERS: mesh geometry only
-                 GAPS:   no element properties extractable
+To get the full extraction flow, call: get_capability(query="model derivative translation metadata")
 
 ── STATUS HANDLING (process_file and execute_workflow) ──────────────────
 
 • success         → present outputs. Done. (REST operations only — Engine-API always returns pending first.)
 • pending         → Job still running. Call get_workflow_status(workflow_handle) IMMEDIATELY.
                     DO NOT pause. DO NOT ask the user. DO NOT wait for confirmation.
-                    Each call polls ~15s then returns — call again right away if still pending.
+                    Each call polls ~25s then returns — call again right away if still pending.
                     Revit jobs take 3–8 minutes; expect 15–30 pending responses. This is normal.
                     ALWAYS read the next_action field — it overrides all other instructions.
                     After ~2 minutes, next_action will say CHECK IN WITH USER — obey it exactly.
                     This prevents Claude Desktop's session timeout from killing long-running jobs.
-                    MULTIPLE PENDING JOBS: call get_workflow_status on ALL pending handles
-                    simultaneously in one turn — do not poll them one at a time sequentially.
+                    MULTIPLE PENDING JOBS: pass workflow_handle as an ARRAY of all pending handles
+                    to poll all jobs in parallel in one call. NEVER poll sequentially one at a time.
+                    Example: get_workflow_status(workflow_handle=[handle1, handle2, handle3])
+                    The server fans out all polls simultaneously — wall time = slowest, not sum.
 • failed          → WorkItem failed. Check reportUrl for the DA execution log.
 • 3lo_required    → status="3lo_required". Call authenticate_aps_3lo() immediately — no confirmation needed.
                     It opens a browser login and stores the token. Once it returns success, immediately re-call
@@ -240,15 +177,11 @@ WHAT MD COVERS vs GAPS PER PRODUCT:
 
 ── CHAIN RECOVERY (if polling chain breaks mid-job) ─────────────────────
 
-If you lose context and only have a workItemId (no full workflow_handle):
+If you only have a workItemId (no full workflow_handle), reconstruct and keep polling:
+  get_workflow_status({ "type": "da_workitem", "workItemId": "<id>", "outputOssUrls": [] })
+  • pending → keep polling with the same minimal handle.
+  • success + empty outputOssUrls → ask user: "Job succeeded but output URLs were lost — paste the oss:// URLs or I'll re-run."
+  • failed → show reportUrl. Offer to re-run.
 
-  Step 1 · Call get_workflow_status with a minimal handle:
-           { "type": "da_workitem", "workItemId": "<id>", "outputOssUrls": [] }
-  Step 2 · If status=pending → keep polling with same minimal handle (outputs will be empty until success).
-  Step 3 · If status=success + outputOssUrls is empty → the output URLs were lost when the chain broke.
-           Ask the user: "The job succeeded but I lost track of the output file locations.
-           Can you paste the oss:// URLs from the original process_file response, or should I re-run the job?"
-  Step 4 · If status=failed → show reportUrl. Offer to re-run.
-
-NEVER tell the user "the MCP server is unresponsive" — if get_workflow_status returns pending, keep polling.
-NEVER pause between polls to summarize progress or ask for confirmation — poll continuously until done.
+NEVER tell the user "the MCP server is unresponsive" — pending means still running, keep polling.
+NEVER pause between polls to summarize progress or ask for confirmation.
