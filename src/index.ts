@@ -224,9 +224,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: "record_token_usage",
         description:
           "Record AI token usage for this session to a persistent local log. " +
-          "Called automatically by get_result on the final output. Call explicitly after multi-job sessions. " +
-          `Current session ID: ${SERVER_SESSION_ID}. ` +
-          "Returns running totals and summary_line — output summary_line verbatim as the last line of your response.",
+          "REQUIRED after multi-job sessions — call this after the last get_result, then output summary_line verbatim as the LAST line of your response. " +
+          "(Single-job: auto-called by get_result when model + token params are passed.) " +
+          `Current session ID: ${SERVER_SESSION_ID}. `,
         inputSchema: zodToJsonSchema(recordTokenUsageSchema),
       },
       {

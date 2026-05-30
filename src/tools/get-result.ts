@@ -119,7 +119,7 @@ export interface GetResultOutput {
   truncated?: boolean;        // kept for back-compat; same as has_more for first call
   binary?: boolean;
   saved_to?: string;          // resolved local path where the file was saved (when save_to was provided)
-  next_action?: string;       // present on final output only — instructs LLM to output summary_line
+  next_action?: string;       // instructs LLM to output summary_line or call record_token_usage
   summary_line?: string;      // token usage summary — output verbatim as last line of response
   error?: string;
   hint?: string;
@@ -224,6 +224,13 @@ async function tryAutoRecordTokens(input: GetResultInput): Promise<string | unde
     return undefined;
   }
 }
+
+// Reminder injected into every is_last_output=false response.
+// Ensures the LLM calls record_token_usage after the final output even with no summary_line.
+const MULTI_JOB_TOKEN_REMINDER =
+  "MULTI-JOB: if all DA job outputs are now retrieved, " +
+  "CALL record_token_usage(model=<your model ID>, input_tokens=<total session estimate>, output_tokens=<total session estimate>) " +
+  "IMMEDIATELY. Then output the summary_line field verbatim as the LAST line of your response before finishing.";
 
 // ── Handler ───────────────────────────────────────────────────────────────
 
@@ -343,7 +350,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
         saved_to: savedTo,
         truncated: false,
         summary_line: summaryLine,
-        next_action: summaryLine ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+        next_action: summaryLine ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
       };
     }
 
@@ -371,7 +378,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
         next_action:
           `File auto-saved to ${savedTo}. ` +
           `To read inline, call get_result with oss_url="${input.oss_url}", read_content=true.` +
-          (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : ""),
+          (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? ` ${MULTI_JOB_TOKEN_REMINDER}` : "")),
       };
     }
 
@@ -393,7 +400,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
       binary: false,
       saved_to: savedTo,
       summary_line: summaryLineText,
-      next_action: summaryLineText ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+      next_action: summaryLineText ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
     };
   }
 
@@ -499,7 +506,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
       saved_to: savedTo,
       truncated: false,
       summary_line: summaryLineBin,
-      next_action: summaryLineBin ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+      next_action: summaryLineBin ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
     };
   }
 
@@ -560,7 +567,7 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
         next_action:
           `File auto-saved to ${savedTo}. ` +
           `To read inline, call get_result with oss_url="${input.oss_url}", read_content=true.` +
-          (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : ""),
+          (summaryLine ? ` Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? ` ${MULTI_JOB_TOKEN_REMINDER}` : "")),
       };
     }
     // Auto-save failed — fall through to normal inline return
@@ -584,6 +591,6 @@ export async function handleGetResult(input: GetResultInput): Promise<GetResultO
     binary: false,
     saved_to: undefined,
     summary_line: summaryLineTxt,
-    next_action: summaryLineTxt ? `Output the summary_line field verbatim as the LAST line of your response.` : undefined,
+    next_action: summaryLineTxt ? `Output the summary_line field verbatim as the LAST line of your response.` : (input.is_last_output === false ? MULTI_JOB_TOKEN_REMINDER : undefined),
   };
 }
